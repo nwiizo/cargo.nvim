@@ -1,0 +1,27 @@
+[package]
+name = "cargo-nvim"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name"]
+description = "A Neovim plugin for Rust Cargo commands"
+license = "MIT"
+
+[lib]
+name = "cargo_nvim"
+crate-type = ["cdylib"]
+
+[dependencies]
+mlua = { version = "0.9", features = ["luajit", "module"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+reqwest = { version = "0.11", features = ["json"] }
+
+[dev-dependencies]
+mlua = { version = "0.9", features = ["luajit"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
