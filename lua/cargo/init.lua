@@ -169,6 +169,23 @@ local function execute_command(cmd_name, args, opts)
 		return
 	end
 
+	-- Save current buffer if it's modified
+	if vim.bo.modified then
+		vim.cmd("write")
+	end
+
+	-- Save all modified buffers if they are Rust files
+	for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+		if vim.bo[bufnr].modified and vim.bo[bufnr].filetype == "rust" then
+			local bufname = vim.api.nvim_buf_get_name(bufnr)
+			if bufname ~= "" then
+				vim.api.nvim_buf_call(bufnr, function()
+					vim.cmd("write")
+				end)
+			end
+		end
+	end
+
 	local bufnr, winnr = create_float_win({
 		title = string.format(" Cargo %s ", cmd_name:upper()),
 		window_width = opts.window_width,
