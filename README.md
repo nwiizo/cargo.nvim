@@ -13,6 +13,21 @@
 - 🔄 Auto-closing windows on command completion
 - ⌨️ Easy keyboard shortcuts for window management
 
+## contents
+
+- [🚀 cargo.nvim](#-cargonvim)
+  - [✨ Features](#-features)
+  - [📥 Installation](#-installation)
+    - [Using lazy.nvim](#using-lazynvim)
+    - [Using packer.nvim](#using-packernvim)
+  - [📋 Requirements](#-requirements)
+  - [🛠️ Available Commands](#️-available-commands)
+  - [⚙️ Configuration](#️-configuration)
+  - [⌨️ Key Mappings](#️-key-mappings)
+  - [👥 Contributing](#-contributing)
+  - [📜 License](#-license)
+  - [💝 Acknowledgements](#-acknowledgements)
+
 ## 📥 Installation
 
 ### Using [lazy.nvim](https://github.com/folke/lazy.nvim)
