@@ -1,0 +1,77 @@
+name: Lua CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "**/*.lua"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "**/*.lua"
+
+jobs:
+  run_tests:
+    name: unit tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            rev: v0.10.0/nvim-linux64.tar.gz
+    steps:
+      - uses: actions/checkout@v3
+
+      - run: date +%F > todays-date
+
+      - name: Restore cache for today's nightly
+        uses: actions/cache@v3
+        with:
+          path: _neovim
+          key: ${{ runner.os }}-${{ matrix.rev }}-${{ hashFiles('todays-date') }}
+
+      - name: Prepare
+        run: |
+          test -d _neovim || {
+            mkdir -p _neovim
+            curl -sL "https://github.com/neovim/neovim/releases/download/${{ matrix.rev }}" | tar xzf - --strip-components=1 -C "${PWD}/_neovim"
+          }
+
+      - name: Run tests
+        run: |
+          export PATH="${PWD}/_neovim/bin:${PATH}"
+          export VIM="${PWD}/_neovim/share/nvim/runtime"
+          # install nvim-lua/plenary.nvim
+          git clone --depth 1 https://github.com/nvim-lua/plenary.nvim ~/.local/share/nvim/site/pack/vendor/start/plenary.nvim
+          nvim --version
+          make luatest
+
+  stylua:
+    name: Check Lua style
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stylua
+        uses: baptiste0928/cargo-install@v3
+        with:
+          crate: stylua
+          features: lua54
+
+      - run: stylua --version
+      - run: stylua --color always --check ./lua/ ./plugin/ ./tests/
+
+  luacheck:
+    name: Lint Lua
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Luacheck linter
+        uses: lunarmodules/luacheck@v1
+        with:
+          args: ./lua/
