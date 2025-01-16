@@ -1,8 +1,18 @@
 -- lua/cargo/init.lua
 local M = {}
 
+-- Debug utilities
+local function debug_print(...)
+	if vim.g.cargo_nvim_debug then
+		print(string.format("[cargo.nvim] %s", table.concat({ ... }, " ")))
+	end
+end
+
 -- Default configuration
 local default_opts = {
+	-- Debug settings
+	debug = false,
+
 	-- Window settings
 	float_window = true,
 	window_width = 0.85,
@@ -62,23 +72,36 @@ local default_opts = {
 -- Load Cargo library
 local function load_cargo_lib()
 	local plugin_dir = vim.fn.fnamemodify(vim.fn.resolve(debug.getinfo(1, "S").source:sub(2)), ":h:h:h")
+	debug_print("Plugin directory:", plugin_dir)
+
 	local lib_name = vim.fn.has("mac") == 1 and "libcargo_nvim.dylib"
 		or vim.fn.has("win32") == 1 and "cargo_nvim.dll"
 		or "libcargo_nvim.so"
 	local lib_path = plugin_dir .. "/target/release/" .. lib_name
+	debug_print("Looking for library at:", lib_path)
 
 	if vim.fn.filereadable(lib_path) == 0 then
-		error(string.format("Cargo library not found: %s", lib_path))
+		error(string.format("Cargo library not found at path: %s", lib_path))
 	end
 
-	local loaded = package.loadlib(lib_path, "luaopen_cargo_nvim")
+	local loaded, err = package.loadlib(lib_path, "luaopen_cargo_nvim")
 	if not loaded then
-		error(string.format("Failed to load library: %s", lib_path))
+		error(string.format("Failed to load library %s: %s", lib_path, err or "unknown error"))
 	end
 
 	local cargo = loaded()
 	if not cargo then
 		error("Failed to initialize cargo module")
+	end
+
+	debug_print("Successfully loaded cargo library")
+
+	-- Debug output of available commands
+	if vim.g.cargo_nvim_debug then
+		debug_print("Available cargo commands:")
+		for name, value in pairs(cargo) do
+			debug_print(string.format("  - %s (%s)", name, type(value)))
+		end
 	end
 
 	return cargo
@@ -124,11 +147,13 @@ local function create_float_win(opts)
 
 	local winnr = vim.api.nvim_open_win(bufnr, true, win_opts)
 
+	-- Set buffer options
 	vim.api.nvim_buf_set_option(bufnr, "buftype", "nofile")
 	vim.api.nvim_buf_set_option(bufnr, "swapfile", false)
 	vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
 	vim.api.nvim_buf_set_option(bufnr, "filetype", "cargo-output")
 
+	-- Set window options
 	if opts.show_line_numbers then
 		vim.api.nvim_win_set_option(winnr, "number", true)
 	end
@@ -167,6 +192,23 @@ local function execute_command(cmd_name, args, opts)
 	if not cargo_lib then
 		error("Cargo library not loaded. Did you call setup()?")
 		return
+	end
+
+	debug_print("Executing command:", cmd_name, "with args:", vim.inspect(args))
+
+	-- Validate command exists
+	if type(cargo_lib[cmd_name]) ~= "function" then
+		local available_cmds = {}
+		for name, _ in pairs(cargo_lib) do
+			table.insert(available_cmds, name)
+		end
+		error(
+			string.format(
+				"Command '%s' not found in cargo library. Available commands: %s",
+				cmd_name,
+				table.concat(available_cmds, ", ")
+			)
+		)
 	end
 
 	-- Save current buffer if it's modified
@@ -220,12 +262,7 @@ local function execute_command(cmd_name, args, opts)
 
 	-- Execute the cargo command through the Rust library
 	local ok, result = pcall(function()
-		-- Check if the command exists in cargo_lib
-		if cargo_lib[cmd_name] then
-			return cargo_lib[cmd_name](args)
-		else
-			error(string.format("Command '%s' not found in cargo library", cmd_name))
-		end
+		return cargo_lib[cmd_name](args)
 	end)
 
 	if ok then
@@ -256,6 +293,9 @@ local function execute_command(cmd_name, args, opts)
 			string.rep("─", vim.api.nvim_win_get_width(winnr) - 2),
 			"@error@" .. tostring(result),
 		})
+
+		-- Log error in debug mode
+		debug_print("Command failed:", result)
 	end
 
 	return bufnr, winnr
@@ -265,7 +305,14 @@ end
 function M.setup(opts)
 	opts = vim.tbl_deep_extend("force", default_opts, opts or {})
 
+	-- Enable debug mode if requested
+	if opts.debug then
+		vim.g.cargo_nvim_debug = true
+		debug_print("Debug mode enabled")
+	end
+
 	-- Load the Cargo library
+	debug_print("Loading cargo library...")
 	cargo_lib = load_cargo_lib()
 
 	-- Set up highlights
@@ -273,7 +320,10 @@ function M.setup(opts)
 
 	-- Register Neovim commands
 	for cmd_name, cmd_opts in pairs(opts.commands) do
-		vim.api.nvim_create_user_command("Cargo" .. cmd_name:sub(1, 1):upper() .. cmd_name:sub(2), function(args)
+		local command_name = "Cargo" .. cmd_name:sub(1, 1):upper() .. cmd_name:sub(2)
+		debug_print("Registering command:", command_name)
+
+		vim.api.nvim_create_user_command(command_name, function(args)
 			local cmd_args = vim.split(args.args, " ")
 			execute_command(cmd_name, cmd_args, opts)
 		end, {
@@ -281,6 +331,8 @@ function M.setup(opts)
 			desc = cmd_opts.desc,
 		})
 	end
+
+	debug_print("Plugin setup completed")
 end
 
 return M

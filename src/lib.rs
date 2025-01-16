@@ -172,36 +172,48 @@ impl CargoCommands {
 }
 
 /// Main module registration for Neovim
+// Previous code remains the same...
+
 #[mlua::lua_module]
 fn cargo_nvim(lua: &Lua) -> LuaResult<LuaTable> {
     let exports = lua.create_table()?;
     let cargo_commands = CargoCommands::new()?;
 
     // Define all available commands with their implementations
-    let commands: Vec<(
-        &str,
-        Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send + 'static>,
-    )> = vec![
-        // Basic commands
+    let commands = vec![
         (
             "bench",
-            Box::new(|cmd, args| cmd.runtime.block_on(async { cmd.cargo_bench(args).await })),
+            Box::new(|cmd: &CargoCommands, args: &[&str]| {
+                cmd.runtime.block_on(async { cmd.cargo_bench(args).await })
+            }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
         ),
         (
             "build",
-            Box::new(|cmd, args| cmd.runtime.block_on(async { cmd.cargo_build(args).await })),
+            Box::new(|cmd: &CargoCommands, args: &[&str]| {
+                cmd.runtime.block_on(async { cmd.cargo_build(args).await })
+            }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
         ),
         (
             "clean",
-            Box::new(|cmd, args| cmd.runtime.block_on(async { cmd.cargo_clean(args).await })),
+            Box::new(|cmd: &CargoCommands, args: &[&str]| {
+                cmd.runtime.block_on(async { cmd.cargo_clean(args).await })
+            }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
         ),
         (
             "doc",
-            Box::new(|cmd, args| cmd.runtime.block_on(async { cmd.cargo_doc(args).await })),
+            Box::new(|cmd: &CargoCommands, args: &[&str]| {
+                cmd.runtime.block_on(async { cmd.cargo_doc(args).await })
+            }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
+        ),
+        (
+            "fmt",
+            Box::new(|cmd: &CargoCommands, args: &[&str]| {
+                cmd.runtime.block_on(async { cmd.cargo_fmt(args).await })
+            }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
         ),
         (
             "new",
-            Box::new(|cmd, args| {
+            Box::new(|cmd: &CargoCommands, args: &[&str]| {
                 cmd.runtime.block_on(async {
                     if let Some(name) = args.first() {
                         let remaining = &args[1..];
@@ -212,92 +224,113 @@ fn cargo_nvim(lua: &Lua) -> LuaResult<LuaTable> {
                         ))
                     }
                 })
-            }),
+            }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
         ),
         (
             "run",
-            Box::new(|cmd, args| cmd.runtime.block_on(async { cmd.cargo_run(args).await })),
+            Box::new(|cmd: &CargoCommands, args: &[&str]| {
+                cmd.runtime.block_on(async { cmd.cargo_run(args).await })
+            }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
         ),
         (
             "test",
-            Box::new(|cmd, args| cmd.runtime.block_on(async { cmd.cargo_test(args).await })),
+            Box::new(|cmd: &CargoCommands, args: &[&str]| {
+                cmd.runtime.block_on(async { cmd.cargo_test(args).await })
+            }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
         ),
         (
             "update",
-            Box::new(|cmd, args| cmd.runtime.block_on(async { cmd.cargo_update(args).await })),
+            Box::new(|cmd: &CargoCommands, args: &[&str]| {
+                cmd.runtime.block_on(async { cmd.cargo_update(args).await })
+            }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
         ),
-        // Additional commands
         (
             "check",
-            Box::new(|cmd, args| cmd.runtime.block_on(async { cmd.cargo_check(args).await })),
+            Box::new(|cmd: &CargoCommands, args: &[&str]| {
+                cmd.runtime.block_on(async { cmd.cargo_check(args).await })
+            }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
         ),
         (
             "init",
-            Box::new(|cmd, args| cmd.runtime.block_on(async { cmd.cargo_init(args).await })),
+            Box::new(|cmd: &CargoCommands, args: &[&str]| {
+                cmd.runtime.block_on(async { cmd.cargo_init(args).await })
+            }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
         ),
         (
             "add",
-            Box::new(|cmd, args| cmd.runtime.block_on(async { cmd.cargo_add(args).await })),
+            Box::new(|cmd: &CargoCommands, args: &[&str]| {
+                cmd.runtime.block_on(async { cmd.cargo_add(args).await })
+            }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
         ),
         (
             "remove",
-            Box::new(|cmd, args| cmd.runtime.block_on(async { cmd.cargo_remove(args).await })),
-        ),
-        (
-            "fmt",
-            Box::new(|cmd, args| cmd.runtime.block_on(async { cmd.cargo_fmt(args).await })),
+            Box::new(|cmd: &CargoCommands, args: &[&str]| {
+                cmd.runtime.block_on(async { cmd.cargo_remove(args).await })
+            }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
         ),
         (
             "clippy",
-            Box::new(|cmd, args| cmd.runtime.block_on(async { cmd.cargo_clippy(args).await })),
+            Box::new(|cmd: &CargoCommands, args: &[&str]| {
+                cmd.runtime.block_on(async { cmd.cargo_clippy(args).await })
+            }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
         ),
         (
             "fix",
-            Box::new(|cmd, args| cmd.runtime.block_on(async { cmd.cargo_fix(args).await })),
+            Box::new(|cmd: &CargoCommands, args: &[&str]| {
+                cmd.runtime.block_on(async { cmd.cargo_fix(args).await })
+            }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
         ),
         (
             "publish",
-            Box::new(|cmd, args| {
+            Box::new(|cmd: &CargoCommands, args: &[&str]| {
                 cmd.runtime
                     .block_on(async { cmd.cargo_publish(args).await })
-            }),
+            }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
         ),
         (
             "install",
-            Box::new(|cmd, args| {
+            Box::new(|cmd: &CargoCommands, args: &[&str]| {
                 cmd.runtime
                     .block_on(async { cmd.cargo_install(args).await })
-            }),
+            }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
         ),
         (
             "uninstall",
-            Box::new(|cmd, args| {
+            Box::new(|cmd: &CargoCommands, args: &[&str]| {
                 cmd.runtime
                     .block_on(async { cmd.cargo_uninstall(args).await })
-            }),
+            }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
         ),
         (
             "search",
-            Box::new(|cmd, args| cmd.runtime.block_on(async { cmd.cargo_search(args).await })),
+            Box::new(|cmd: &CargoCommands, args: &[&str]| {
+                cmd.runtime.block_on(async { cmd.cargo_search(args).await })
+            }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
         ),
         (
             "tree",
-            Box::new(|cmd, args| cmd.runtime.block_on(async { cmd.cargo_tree(args).await })),
+            Box::new(|cmd: &CargoCommands, args: &[&str]| {
+                cmd.runtime.block_on(async { cmd.cargo_tree(args).await })
+            }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
         ),
         (
             "vendor",
-            Box::new(|cmd, args| cmd.runtime.block_on(async { cmd.cargo_vendor(args).await })),
+            Box::new(|cmd: &CargoCommands, args: &[&str]| {
+                cmd.runtime.block_on(async { cmd.cargo_vendor(args).await })
+            }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
         ),
         (
             "audit",
-            Box::new(|cmd, args| cmd.runtime.block_on(async { cmd.cargo_audit(args).await })),
+            Box::new(|cmd: &CargoCommands, args: &[&str]| {
+                cmd.runtime.block_on(async { cmd.cargo_audit(args).await })
+            }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
         ),
         (
             "outdated",
-            Box::new(|cmd, args| {
+            Box::new(|cmd: &CargoCommands, args: &[&str]| {
                 cmd.runtime
                     .block_on(async { cmd.cargo_outdated(args).await })
-            }),
+            }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
         ),
     ];
 
