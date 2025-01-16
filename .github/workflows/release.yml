@@ -1,0 +1,189 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  create-release:
+    permissions:
+      contents: write
+    runs-on: ubuntu-20.04
+    outputs:
+      release_id: ${{ steps.create-release.outputs.id }}
+      release_upload_url: ${{ steps.create-release.outputs.upload_url }}
+      release_body: "${{ steps.tag.outputs.message }}"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: get_version
+        uses: battila7/get-version-action@v2
+
+      - name: Get tag message
+        id: tag
+        run: |
+          git fetch --depth=1 origin "+refs/tags/*:refs/tags/*"
+          {
+            echo "message<<EOF"
+            git tag -l --format='%(contents)' "${{ steps.get_version.outputs.version }}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create Release
+        id: create-release
+        uses: ncipollo/release-action@v1
+        with:
+          draft: true
+          name: ${{ steps.get_version.outputs.version }}
+          tag: ${{ steps.get_version.outputs.version }}
+          body: "${{ steps.tag.outputs.message }}"
+
+  releases-matrix:
+    needs: [create-release]
+    strategy:
+      fail-fast: false
+      matrix:
+        feature: [lua51, luajit]
+        config:
+          - os: ubuntu-latest
+            os_name: linux
+            arch: aarch64
+            rust_target: aarch64-unknown-linux-gnu
+            docker_platform: linux/aarch64
+            container: quay.io/pypa/manylinux2014_aarch64
+          - os: ubuntu-latest
+            os_name: linux
+            arch: x86_64
+            rust_target: x86_64-unknown-linux-gnu
+            docker_platform: linux/amd64
+            container: quay.io/pypa/manylinux2014_x86_64 # for glibc 2.17
+          - os: macos-13
+            os_name: darwin
+            arch: x86_64
+            rust_target: x86_64-apple-darwin
+          - os: macos-latest
+            os_name: darwin
+            arch: aarch64
+            rust_target: aarch64-apple-darwin
+          - os: windows-latest
+            os_name: windows
+            arch: x86_64
+            rust_target: x86_64-pc-windows-msvc
+          - os: windows-latest
+            os_name: windows
+            arch: aarch64
+            rust_target: aarch64-pc-windows-msvc
+
+    runs-on: ${{ matrix.config.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        if: ${{ matrix.config.docker_platform == 'linux/aarch64' }}
+        uses: docker/setup-qemu-action@v2
+        with:
+          platforms: all
+
+      - uses: Swatinem/rust-cache@v2
+        if: ${{ matrix.config.container == null }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: ${{ matrix.config.container == null }}
+        with:
+          targets: ${{ matrix.config.rust_target }}
+          toolchain: 1.80.0
+
+      - name: Build all crates
+        if: ${{ matrix.config.container == null }}
+        run: |
+          cargo build --release --features "${{ matrix.feature }}"
+
+      - name: Build all crates with glibc 2.17
+        if: ${{ matrix.config.container != null }}
+        run: |
+          docker run \
+            --rm \
+            -v "$(pwd)":/workspace \
+            -w /workspace \
+            --platform "${{ matrix.config.docker_platform }}" \
+            "${{ matrix.config.container }}" \
+            bash -c "yum install -y openssl-devel && curl --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal && . /root/.cargo/env && cargo build --release --features '${{ matrix.feature }}'"
+
+      - name: Handle binaries
+        if: ${{ matrix.config.os_name != 'windows' }}
+        shell: bash
+        run: |
+          mkdir -p results
+          ext=""
+          if [ "${{ matrix.config.os_name }}" = "linux" ]; then
+            ext="so"
+          else
+            ext="dylib"
+          fi
+          cp "target/release/libcargo_nvim.${ext}" "results/cargo_nvim.${ext}"
+
+          cd results || exit 1
+          tar zcvf "cargo-nvim-${{ matrix.config.os_name }}-${{ matrix.config.arch }}-${{ matrix.feature }}.tar.gz" -- ./*.${ext}
+
+      - name: Handle binaries (Windows)
+        if: ${{ matrix.config.os_name == 'windows' }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path results
+          Copy-Item -Path "target\release\cargo_nvim.dll" -Destination "results\cargo_nvim.dll"
+          Set-Location -Path results
+          $dllFiles = Get-ChildItem -Filter "*.dll" | Select-Object -ExpandProperty Name
+          Compress-Archive -Path $dllFiles -DestinationPath "cargo-nvim-${{ matrix.config.os_name }}-${{ matrix.config.arch }}-${{ matrix.feature }}.zip"
+
+      - name: Upload Release Asset
+        uses: shogo82148/actions-upload-release-asset@v1
+        if: ${{ matrix.config.os_name != 'windows' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ASSET_NAME: cargo-nvim-${{ matrix.config.os_name }}-${{ matrix.config.arch }}-${{ matrix.feature }}.tar.gz
+        with:
+          upload_url: ${{ needs.create-release.outputs.release_upload_url }}
+          asset_path: ./results/cargo-nvim-${{ matrix.config.os_name }}-${{ matrix.config.arch }}-${{ matrix.feature }}.tar.gz
+
+      - name: Upload Release Asset (Windows)
+        uses: shogo82148/actions-upload-release-asset@v1
+        if: ${{ matrix.config.os_name == 'windows' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ASSET_NAME: cargo-nvim-${{ matrix.config.os_name }}-${{ matrix.config.arch }}-${{ matrix.feature }}.zip
+        with:
+          upload_url: ${{ needs.create-release.outputs.release_upload_url }}
+          asset_path: ./results/cargo-nvim-${{ matrix.config.os_name }}-${{ matrix.config.arch }}-${{ matrix.feature }}.zip
+
+  publish-release:
+    permissions:
+      contents: write
+    runs-on: ubuntu-20.04
+    needs: [create-release, releases-matrix]
+
+    steps:
+      - name: publish release
+        id: publish-release
+        uses: actions/github-script@v6
+        env:
+          release_id: ${{ needs.create-release.outputs.release_id }}
+        with:
+          script: |
+            github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: process.env.release_id,
+              draft: false,
+              prerelease: false
+            })
