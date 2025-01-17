@@ -10,25 +10,17 @@ end
 
 -- Default configuration
 local default_opts = {
-	-- Debug settings
 	debug = false,
-
-	-- Window settings
 	float_window = true,
 	window_width = 0.85,
 	window_height = 0.8,
 	border = "rounded",
-
-	-- Auto-close settings
 	auto_close = true,
 	close_timeout = 30000,
-
-	-- Display settings
 	show_line_numbers = true,
 	show_cursor_line = true,
 	wrap_output = false,
 
-	-- Cargo commands
 	commands = {
 		bench = { nargs = "*", desc = "Run benchmarks" },
 		build = { nargs = "*", desc = "Compile package" },
@@ -55,7 +47,6 @@ local default_opts = {
 		outdated = { nargs = "*", desc = "Check outdated deps" },
 	},
 
-	-- Keymaps
 	keymaps = {
 		close = "q",
 		scroll_up = "<C-u>",
@@ -95,22 +86,13 @@ local function load_cargo_lib()
 	end
 
 	debug_print("Successfully loaded cargo library")
-
-	-- Debug output of available commands
-	if vim.g.cargo_nvim_debug then
-		debug_print("Available cargo commands:")
-		for name, value in pairs(cargo) do
-			debug_print(string.format("  - %s (%s)", name, type(value)))
-		end
-	end
-
 	return cargo
 end
 
 -- Global cargo lib instance
 local cargo_lib = nil
 
--- Set up syntax highlighting
+-- Set up highlights
 local function setup_highlights()
 	local highlights = {
 		CargoError = { fg = "#ff5555", bold = true },
@@ -147,13 +129,11 @@ local function create_float_win(opts)
 
 	local winnr = vim.api.nvim_open_win(bufnr, true, win_opts)
 
-	-- Set buffer options
 	vim.api.nvim_buf_set_option(bufnr, "buftype", "nofile")
 	vim.api.nvim_buf_set_option(bufnr, "swapfile", false)
 	vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
 	vim.api.nvim_buf_set_option(bufnr, "filetype", "cargo-output")
 
-	-- Set window options
 	if opts.show_line_numbers then
 		vim.api.nvim_win_set_option(winnr, "number", true)
 	end
@@ -163,28 +143,85 @@ local function create_float_win(opts)
 	return bufnr, winnr
 end
 
--- Process command output
-local function process_output(lines)
-	local processed = {}
-	for _, line in ipairs(lines) do
-		local timestamp = os.date("%H:%M:%S")
-		local prefixed_line = string.format("[%s] ", timestamp)
+-- Process single line safely
+local function format_line(line, with_timestamp)
+	if type(line) ~= "string" then
+		return nil
+	end
 
-		if line:match("^error") then
-			table.insert(processed, prefixed_line .. "@error@" .. line)
-		elseif line:match("^warning") then
-			table.insert(processed, prefixed_line .. "@warning@" .. line)
-		elseif line:match("^%s*Compiling") then
-			table.insert(processed, prefixed_line .. "@info@" .. line)
-		elseif line:match("^%s*Running") then
-			table.insert(processed, prefixed_line .. "@info@" .. line)
-		elseif line:match("^%s*Finished") then
-			table.insert(processed, prefixed_line .. "@success@" .. line)
+	-- Remove all types of line endings and null bytes
+	local clean = line:gsub("\r\n", " "):gsub("\n", " "):gsub("\r", " "):gsub("%z", "")
+
+	-- Skip empty lines
+	if clean:match("^%s*$") then
+		return nil
+	end
+
+	-- Add timestamp if requested
+	if with_timestamp then
+		local timestamp = os.date("%H:%M:%S")
+
+		-- Format based on content
+		if clean:match("^error") or clean:match("^Error") then
+			return string.format("[%s] @error@%s", timestamp, clean)
+		elseif clean:match("^warning") or clean:match("^Warning") then
+			return string.format("[%s] @warning@%s", timestamp, clean)
+		elseif clean:match("^%s*Compiling") then
+			return string.format("[%s] @info@%s", timestamp, clean)
+		elseif clean:match("^%s*Running") then
+			return string.format("[%s] @info@%s", timestamp, clean)
+		elseif clean:match("^%s*Finished") then
+			return string.format("[%s] @success@%s", timestamp, clean)
 		else
-			table.insert(processed, prefixed_line .. line)
+			return string.format("[%s] %s", timestamp, clean)
 		end
 	end
-	return processed
+
+	return clean
+end
+
+-- Safe buffer append
+local function append_to_buffer(bufnr, content)
+	if not vim.api.nvim_buf_is_valid(bufnr) then
+		return false
+	end
+
+	-- Ensure content is a string
+	if type(content) ~= "string" then
+		return false
+	end
+
+	-- Process and append content
+	local formatted = format_line(content, false)
+	if formatted then
+		-- Split by any remaining line breaks (shouldn't be any, but just in case)
+		local lines = vim.split(formatted, "\n")
+		for _, line in ipairs(lines) do
+			if line:match("%S") then -- Skip empty lines
+				vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, { line })
+			end
+		end
+	end
+
+	return true
+end
+
+-- Process command output
+local function process_output(output)
+	if type(output) ~= "string" then
+		return { "Invalid output format" }
+	end
+
+	local result = {}
+	-- Split output into lines and process each one
+	for _, line in ipairs(vim.split(output, "\n", { trimempty = true })) do
+		local formatted = format_line(line, true)
+		if formatted then
+			table.insert(result, formatted)
+		end
+	end
+
+	return result
 end
 
 -- Execute Cargo command
@@ -192,40 +229,6 @@ local function execute_command(cmd_name, args, opts)
 	if not cargo_lib then
 		error("Cargo library not loaded. Did you call setup()?")
 		return
-	end
-
-	debug_print("Executing command:", cmd_name, "with args:", vim.inspect(args))
-
-	-- Validate command exists
-	if type(cargo_lib[cmd_name]) ~= "function" then
-		local available_cmds = {}
-		for name, _ in pairs(cargo_lib) do
-			table.insert(available_cmds, name)
-		end
-		error(
-			string.format(
-				"Command '%s' not found in cargo library. Available commands: %s",
-				cmd_name,
-				table.concat(available_cmds, ", ")
-			)
-		)
-	end
-
-	-- Save current buffer if it's modified
-	if vim.bo.modified then
-		vim.cmd("write")
-	end
-
-	-- Save all modified buffers if they are Rust files
-	for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
-		if vim.bo[bufnr].modified and vim.bo[bufnr].filetype == "rust" then
-			local bufname = vim.api.nvim_buf_get_name(bufnr)
-			if bufname ~= "" then
-				vim.api.nvim_buf_call(bufnr, function()
-					vim.cmd("write")
-				end)
-			end
-		end
 	end
 
 	local bufnr, winnr = create_float_win({
@@ -238,47 +241,41 @@ local function execute_command(cmd_name, args, opts)
 		show_cursor_line = opts.show_cursor_line,
 	})
 
-	-- Display command
-	local cmd_line = string.format("cargo %s %s", cmd_name, table.concat(args, " "))
+	-- Set initial content
+	vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
+
+	-- Create command string safely
+	local args_str = #args > 0 and (" " .. table.concat(args, " ")) or ""
+	local cmd_line = string.format("cargo %s%s", cmd_name, args_str)
+
 	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
 		"@command@" .. cmd_line,
 		string.rep("─", vim.api.nvim_win_get_width(winnr) - 2),
 		"",
 	})
 
-	-- Set up keymaps
-	local function map(key, action)
-		vim.api.nvim_buf_set_keymap(bufnr, "n", key, action, {
-			noremap = true,
-			silent = true,
-		})
-	end
-
-	for key, mapping in pairs(opts.keymaps) do
-		if type(mapping) == "string" then
-			map(mapping, ":q<CR>")
-		end
-	end
-
-	-- Execute the cargo command through the Rust library
+	-- Execute command
 	local ok, result = pcall(function()
-		return cargo_lib[cmd_name](args)
+		if #args > 0 then
+			return cargo_lib[cmd_name](args)
+		else
+			return cargo_lib[cmd_name]({})
+		end
 	end)
 
 	if ok then
-		-- Process and display the output
-		local output_lines = vim.split(result, "\n")
-		local processed = process_output(output_lines)
-		vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, processed)
+		local lines = process_output(result)
+		for _, line in ipairs(lines) do
+			vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, { line })
+		end
 
-		-- Add success message
+		-- Add completion message
 		vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
 			"",
 			string.rep("─", vim.api.nvim_win_get_width(winnr) - 2),
 			"@success@Command completed successfully",
 		})
 
-		-- Auto-close if enabled
 		if opts.auto_close then
 			vim.defer_fn(function()
 				if vim.api.nvim_win_is_valid(winnr) then
@@ -287,17 +284,15 @@ local function execute_command(cmd_name, args, opts)
 			end, opts.close_timeout)
 		end
 	else
-		-- Display error message
 		vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
 			"",
 			string.rep("─", vim.api.nvim_win_get_width(winnr) - 2),
 			"@error@" .. tostring(result),
 		})
-
-		-- Log error in debug mode
-		debug_print("Command failed:", result)
+		debug_print("Command failed:", tostring(result))
 	end
 
+	vim.api.nvim_buf_set_option(bufnr, "modifiable", false)
 	return bufnr, winnr
 end
 
@@ -305,26 +300,30 @@ end
 function M.setup(opts)
 	opts = vim.tbl_deep_extend("force", default_opts, opts or {})
 
-	-- Enable debug mode if requested
 	if opts.debug then
 		vim.g.cargo_nvim_debug = true
 		debug_print("Debug mode enabled")
 	end
 
-	-- Load the Cargo library
 	debug_print("Loading cargo library...")
 	cargo_lib = load_cargo_lib()
 
-	-- Set up highlights
 	setup_highlights()
 
-	-- Register Neovim commands
 	for cmd_name, cmd_opts in pairs(opts.commands) do
 		local command_name = "Cargo" .. cmd_name:sub(1, 1):upper() .. cmd_name:sub(2)
 		debug_print("Registering command:", command_name)
 
 		vim.api.nvim_create_user_command(command_name, function(args)
-			local cmd_args = vim.split(args.args, " ")
+			-- Filter out empty arguments
+			local cmd_args = {}
+			if args.args and args.args ~= "" then
+				for _, arg in ipairs(vim.split(args.args, "%s+")) do
+					if arg and arg ~= "" then
+						table.insert(cmd_args, arg)
+					end
+				end
+			end
 			execute_command(cmd_name, cmd_args, opts)
 		end, {
 			nargs = cmd_opts.nargs,
