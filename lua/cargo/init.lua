@@ -1,4 +1,5 @@
 -- lua/cargo/init.lua
+local vim = _G.vim
 local M = {}
 
 -- Debug utilities
@@ -109,40 +110,6 @@ local function setup_highlights()
 	end
 end
 
--- Create floating window
-local function create_float_win(opts)
-	local width = math.floor(vim.o.columns * opts.window_width)
-	local height = math.floor(vim.o.lines * opts.window_height)
-	local bufnr = vim.api.nvim_create_buf(false, true)
-
-	local win_opts = {
-		relative = "editor",
-		width = width,
-		height = height,
-		col = math.floor((vim.o.columns - width) / 2),
-		row = math.floor((vim.o.lines - height) / 2),
-		style = "minimal",
-		border = opts.border,
-		title = opts.title,
-		title_pos = "center",
-	}
-
-	local winnr = vim.api.nvim_open_win(bufnr, true, win_opts)
-
-	vim.api.nvim_buf_set_option(bufnr, "buftype", "nofile")
-	vim.api.nvim_buf_set_option(bufnr, "swapfile", false)
-	vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
-	vim.api.nvim_buf_set_option(bufnr, "filetype", "cargo-output")
-
-	if opts.show_line_numbers then
-		vim.api.nvim_win_set_option(winnr, "number", true)
-	end
-	vim.api.nvim_win_set_option(winnr, "wrap", opts.wrap_output)
-	vim.api.nvim_win_set_option(winnr, "cursorline", opts.show_cursor_line)
-
-	return bufnr, winnr
-end
-
 -- Process single line safely
 local function format_line(line, with_timestamp)
 	if type(line) ~= "string" then
@@ -180,30 +147,69 @@ local function format_line(line, with_timestamp)
 	return clean
 end
 
--- Safe buffer append
-local function append_to_buffer(bufnr, content)
-	if not vim.api.nvim_buf_is_valid(bufnr) then
-		return false
+-- Create floating window
+local function create_float_win(opts)
+	local width = math.floor(vim.o.columns * opts.window_width)
+	local height = math.floor(vim.o.lines * opts.window_height)
+	local bufnr = vim.api.nvim_create_buf(false, true)
+
+	local win_opts = {
+		relative = "editor",
+		width = width,
+		height = height,
+		col = math.floor((vim.o.columns - width) / 2),
+		row = math.floor((vim.o.lines - height) / 2),
+		style = "minimal",
+		border = opts.border,
+		title = opts.title,
+		title_pos = "center",
+	}
+
+	local winnr = vim.api.nvim_open_win(bufnr, true, win_opts)
+
+	vim.api.nvim_buf_set_option(bufnr, "buftype", "nofile")
+	vim.api.nvim_buf_set_option(bufnr, "swapfile", false)
+	vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
+	vim.api.nvim_buf_set_option(bufnr, "filetype", "cargo-output")
+
+	if opts.show_line_numbers then
+		vim.api.nvim_win_set_option(winnr, "number", true)
+	end
+	vim.api.nvim_win_set_option(winnr, "wrap", opts.wrap_output)
+	vim.api.nvim_win_set_option(winnr, "cursorline", opts.show_cursor_line)
+
+	-- Set up key mappings
+	local function set_keymap(mode, key, action)
+		vim.api.nvim_buf_set_keymap(bufnr, mode, key, action, {
+			nowait = true,
+			noremap = true,
+			silent = true,
+		})
 	end
 
-	-- Ensure content is a string
-	if type(content) ~= "string" then
-		return false
-	end
+	-- Close window mappings
+	set_keymap("n", opts.keymaps.close, ":q<CR>")
+	set_keymap("n", "<Esc>", ":q<CR>")
 
-	-- Process and append content
-	local formatted = format_line(content, false)
-	if formatted then
-		-- Split by any remaining line breaks (shouldn't be any, but just in case)
-		local lines = vim.split(formatted, "\n")
-		for _, line in ipairs(lines) do
-			if line:match("%S") then -- Skip empty lines
-				vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, { line })
-			end
-		end
-	end
+	-- Interrupt command mapping
+	set_keymap("n", opts.keymaps.interrupt, '<cmd>lua require("cargo").interrupt()<CR>')
 
-	return true
+	-- Scroll mappings
+	set_keymap("n", opts.keymaps.scroll_up, "<C-u>")
+	set_keymap("n", opts.keymaps.scroll_down, "<C-d>")
+	set_keymap("n", opts.keymaps.scroll_top, "gg")
+	set_keymap("n", opts.keymaps.scroll_bottom, "G")
+
+	-- Toggle wrap mapping
+	set_keymap("n", opts.keymaps.toggle_wrap, "<cmd>lua vim.wo.wrap = not vim.wo.wrap<CR>")
+
+	-- Copy output mapping
+	set_keymap("n", opts.keymaps.copy_output, "<cmd>%y+<CR>")
+
+	-- Clear output mapping
+	set_keymap("n", opts.keymaps.clear_output, "<cmd>%delete_<CR>")
+
+	return bufnr, winnr
 end
 
 -- Process command output
@@ -226,6 +232,9 @@ end
 
 -- Execute Cargo command
 local function execute_command(cmd_name, args, opts)
+	-- Save all modified buffers before executing command
+	vim.cmd("wa")
+
 	if not cargo_lib then
 		error("Cargo library not loaded. Did you call setup()?")
 		return
@@ -239,6 +248,7 @@ local function execute_command(cmd_name, args, opts)
 		show_line_numbers = opts.show_line_numbers,
 		wrap_output = opts.wrap_output,
 		show_cursor_line = opts.show_cursor_line,
+		keymaps = opts.keymaps,
 	})
 
 	-- Set initial content
@@ -294,6 +304,13 @@ local function execute_command(cmd_name, args, opts)
 
 	vim.api.nvim_buf_set_option(bufnr, "modifiable", false)
 	return bufnr, winnr
+end
+
+-- Interrupt running cargo command
+function M.interrupt()
+	if cargo_lib and cargo_lib.interrupt then
+		cargo_lib.interrupt()
+	end
 end
 
 -- Initialize plugin
