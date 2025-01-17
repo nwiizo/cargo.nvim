@@ -49,6 +49,10 @@ jobs:
           local is_windows = vim.loop.os_uname().sysname == "Windows_NT"
           local base_dir = vim.loop.cwd()
 
+          if not vim.inspect then
+            vim.inspect = require("vim.inspect")
+          end
+
           vim.cmd('set rtp+=' .. plenary_dir)
           vim.cmd('set rtp+=' .. base_dir)
           vim.cmd('runtime plugin/plenary.vim')
@@ -65,13 +69,14 @@ jobs:
 
           local lua_path = join_paths(base_dir, 'lua')
           package.path = normalize_path(lua_path) .. '/?.lua;' .. normalize_path(lua_path) .. '/?/init.lua;' .. package.path
+
+          require('plenary.busted')
           EOF
 
       - name: Run tests
         run: |
           export PATH="${PWD}/_neovim/bin:${PATH}"
           export VIM="${PWD}/_neovim/share/nvim/runtime"
-          # install nvim-lua/plenary.nvim
           git clone --depth 1 https://github.com/nvim-lua/plenary.nvim ~/.local/share/nvim/site/pack/vendor/start/plenary.nvim
           nvim --version
           nvim --headless --noplugin -u tests/minimal_init.lua -c "PlenaryBustedDirectory tests/ { minimal_init = './tests/minimal_init.lua' }"
@@ -81,13 +86,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Install stylua
         uses: baptiste0928/cargo-install@v3
         with:
           crate: stylua
           features: lua54
-
       - run: stylua --version
       - run: stylua --color always --check ./lua/ ./plugin/ ./tests/
 
@@ -97,7 +100,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Luacheck linter
         uses: lunarmodules/luacheck@v1
         with:
