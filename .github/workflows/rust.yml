@@ -55,20 +55,14 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        lua: [lua51, luajit]
+        lua: [luajit] # lua51を除去
         include:
-          - os: ubuntu-latest
-            lua: lua51
-            pkg: liblua5.1-dev
           - os: ubuntu-latest
             lua: luajit
             pkg: libluajit-5.1-dev
           - os: macos-latest
-            lua: lua51
-            brew: lua@5.1
-          - os: macos-latest
             lua: luajit
-            brew: luajit
+            brew: luajit-openresty # luajitのパッケージを変更
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -87,6 +81,8 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew install ${{ matrix.brew }}
+          echo "LIBRARY_PATH=/opt/homebrew/lib" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig" >> $GITHUB_ENV
 
       - name: Run tests
         run: cargo test --no-default-features --features ${{ matrix.lua }}
