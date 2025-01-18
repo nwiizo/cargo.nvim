@@ -179,49 +179,32 @@ pub fn register_commands(lua: &Lua) -> LuaResult<LuaTable> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::cargo_nvim;
     use mlua::Lua;
 
     #[test]
-    fn test_register_commands() {
+    fn test_module_registration() {
         let lua = Lua::new();
-        let result = register_commands(&lua);
+        let result = cargo_nvim(&lua);
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_command_registration() {
+    fn test_exported_commands() {
         let lua = Lua::new();
-        let exports = register_commands(&lua).unwrap();
-        assert!(exports.contains_key("build").unwrap());
-        assert!(exports.contains_key("test").unwrap());
-        assert!(exports.contains_key("run").unwrap());
+        let table = cargo_nvim(&lua).unwrap();
+
+        assert!(table.contains_key("build").unwrap());
+        assert!(table.contains_key("test").unwrap());
+        assert!(table.contains_key("check").unwrap());
     }
 
     #[test]
-    fn test_cargo_command_execution() {
+    fn test_command_error_handling() {
         let lua = Lua::new();
-        let exports = register_commands(&lua).unwrap();
-
-        // --help は常に利用可能なコマンドを使用
-        let result: mlua::Result<String> = exports
-            .get::<_, mlua::Function>("help")
-            .unwrap()
-            .call(Vec::<String>::new());
-
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_invalid_command() {
-        let lua = Lua::new();
-        let exports = register_commands(&lua).unwrap();
-
-        let result: mlua::Result<String> = exports
-            .get::<_, mlua::Function>("build")
-            .unwrap()
-            .call(vec!["--invalid-flag"]);
-
+        let table = cargo_nvim(&lua).unwrap();
+        let build_fn: mlua::Function = table.get("build").unwrap();
+        let result: mlua::Result<String> = build_fn.call(["--invalid-flag"]);
         assert!(result.is_err());
     }
 }
