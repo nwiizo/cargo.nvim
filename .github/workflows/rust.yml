@@ -32,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest] # Windowsは一時的に無効化
+        os: [ubuntu-latest, macos-latest]
         rust: [stable]
         include:
           - os: ubuntu-latest
@@ -46,7 +46,7 @@ jobs:
       - name: Install Rust ${{ matrix.rust }}
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.71.1" # Rust 1.71.1を明示的に指定
+          toolchain: "1.73.0" # bstrパッケージの要件に合わせて更新
 
       - name: Install LuaJIT (Ubuntu)
         if: runner.os == 'Linux'
@@ -80,7 +80,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-          toolchain: "1.71.1"
+          toolchain: "1.73.0"
 
       - name: Install LuaJIT
         run: |
@@ -107,7 +107,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.71.1" # zerofromの要件に合わせて更新
+          toolchain: "1.73.0"
 
       - name: Install LuaJIT
         run: |
@@ -131,7 +131,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.71.1"
+          toolchain: "1.73.0"
 
       - name: Install LuaJIT
         run: |
