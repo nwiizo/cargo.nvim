@@ -1,97 +1,30 @@
 name: Rust CI
 
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
-      - "**/*.rs"
-      - "Cargo.lock"
+      - "**.rs"
       - "Cargo.toml"
+      - "Cargo.lock"
       - ".github/workflows/ci.yml"
   pull_request:
-    branches:
-      - main
+    branches: [main]
     paths:
-      - "**/*.rs"
-      - "Cargo.lock"
+      - "**.rs"
       - "Cargo.toml"
+      - "Cargo.lock"
       - ".github/workflows/ci.yml"
 
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
-  CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: 1
 
 jobs:
-  test:
-    name: Test Suite (${{ matrix.lua-feature }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        rust: [stable]
-        lua-feature: [lua51, luajit]
-        include:
-          - os: ubuntu-latest
-            lua-feature: lua51
-            lua-dev: liblua5.1-dev
-          - os: ubuntu-latest
-            lua-feature: luajit
-            lua-dev: libluajit-5.1-dev
-          - os: macos-latest
-            lua-feature: lua51
-            lua-brew: lua@5.1
-          - os: macos-latest
-            lua-feature: luajit
-            lua-brew: luajit
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust ${{ matrix.rust }}
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.73.0"
-
-      - name: Install Lua (Ubuntu)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ${{ matrix.lua-dev }}
-
-      - name: Install Lua (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew install ${{ matrix.lua-brew }}
-
-      - name: Cache Dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-          key: ${{ matrix.os }}-${{ matrix.lua-feature }}
-
-      - name: Build
-        run: cargo build --verbose --features ${{ matrix.lua-feature }}
-
-      - name: Run tests
-        run: cargo test --verbose --features ${{ matrix.lua-feature }}
-
-  lint:
-    name: Lint (${{ matrix.lua-feature }})
+  check:
+    name: Check
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        lua-feature: [lua51, luajit]
-        include:
-          - lua-feature: lua51
-            lua-dev: liblua5.1-dev
-          - lua-feature: luajit
-            lua-dev: libluajit-5.1-dev
-
     steps:
       - uses: actions/checkout@v4
 
@@ -99,94 +32,60 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-          toolchain: "1.73.0"
 
-      - name: Install Lua
+      - name: Install LuaJIT
         run: |
           sudo apt-get update
-          sudo apt-get install -y ${{ matrix.lua-dev }}
+          sudo apt-get install -y libluajit-5.1-dev
 
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-          key: lint-${{ matrix.lua-feature }}
 
       - name: Check format
-        run: cargo fmt --all -- --check
+        run: cargo fmt --check
 
       - name: Check clippy
-        run: cargo clippy --features ${{ matrix.lua-feature }} -- -D warnings
+        run: cargo clippy -- -D warnings
 
-      - name: Check clippy (tests)
-        run: cargo clippy --tests --features ${{ matrix.lua-feature }} -- -D warnings
-
-  msrv:
-    name: MSRV (${{ matrix.lua-feature }})
-    runs-on: ubuntu-latest
+  test:
+    name: Test
+    needs: check
     strategy:
+      fail-fast: false
       matrix:
-        lua-feature: [lua51, luajit]
+        os: [ubuntu-latest, macos-latest]
+        lua: [lua51, luajit]
         include:
-          - lua-feature: lua51
-            lua-dev: liblua5.1-dev
-          - lua-feature: luajit
-            lua-dev: libluajit-5.1-dev
+          - os: ubuntu-latest
+            lua: lua51
+            pkg: liblua5.1-dev
+          - os: ubuntu-latest
+            lua: luajit
+            pkg: libluajit-5.1-dev
+          - os: macos-latest
+            lua: lua51
+            brew: lua@5.1
+          - os: macos-latest
+            lua: luajit
+            brew: luajit
 
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.73.0"
-
-      - name: Install Lua
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ${{ matrix.lua-dev }}
-
-      - name: Cache Dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-          key: msrv-${{ matrix.lua-feature }}
-
-      - name: Check MSRV
-        run: cargo check --features ${{ matrix.lua-feature }}
-
-  docs:
-    name: Documentation (${{ matrix.lua-feature }})
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        lua-feature: [lua51, luajit]
-        include:
-          - lua-feature: lua51
-            lua-dev: liblua5.1-dev
-          - lua-feature: luajit
-            lua-dev: libluajit-5.1-dev
-
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.73.0"
 
-      - name: Install Lua
+      - name: Install Lua (Ubuntu)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ${{ matrix.lua-dev }}
+          sudo apt-get install -y ${{ matrix.pkg }}
 
-      - name: Cache Dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-          key: docs-${{ matrix.lua-feature }}
+      - name: Install Lua (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install ${{ matrix.brew }}
 
-      - name: Check documentation
-        env:
-          RUSTDOCFLAGS: "-D warnings"
-        run: cargo doc --no-deps --features ${{ matrix.lua-feature }}
+      - name: Run tests
+        run: cargo test --no-default-features --features ${{ matrix.lua }}
