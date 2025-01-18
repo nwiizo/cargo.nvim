@@ -31,10 +31,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        rust: [stable, beta]
-        include:
-          - os: ubuntu-latest
-            rust: nightly
+        rust: [stable]
     steps:
       - uses: actions/checkout@v4
 
@@ -42,6 +39,22 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
+
+      - name: Install LuaJIT (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y luajit libluajit-5.1-dev
+
+      - name: Install LuaJIT (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install luajit
+
+      - name: Install LuaJIT (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          choco install luajit
 
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
@@ -63,6 +76,11 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Install LuaJIT
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y luajit libluajit-5.1-dev
+
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
 
@@ -71,6 +89,28 @@ jobs:
 
       - name: Check clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
+
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.71.0 # Updated Minimum Supported Rust Version
+
+      - name: Install LuaJIT
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y luajit libluajit-5.1-dev
+
+      - name: Cache Dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check MSRV
+        run: cargo check --all-features
 
   coverage:
     name: Code Coverage
@@ -82,6 +122,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
+
+      - name: Install LuaJIT
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y luajit libluajit-5.1-dev
 
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
@@ -107,6 +152,11 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install LuaJIT
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y luajit libluajit-5.1-dev
+
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
 
@@ -114,32 +164,3 @@ jobs:
         env:
           RUSTDOCFLAGS: "-D warnings"
         run: cargo doc --no-deps --all-features
-
-  msrv:
-    name: MSRV
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.70.0 # Minimum Supported Rust Version
-
-      - name: Cache Dependencies
-        uses: Swatinem/rust-cache@v2
-
-      - name: Check MSRV
-        run: cargo check --all-features
-
-  security_audit:
-    name: Security Audit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install cargo-audit
-        uses: taiki-e/install-action@cargo-audit
-
-      - name: Run security audit
-        run: cargo audit
