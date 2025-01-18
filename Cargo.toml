@@ -11,11 +11,11 @@ name = "cargo_nvim"
 crate-type = ["cdylib"]
 
 [dependencies]
-mlua = { version = "0.9", features = ["module"], default-features = false }
+mlua = { version = "0.10", features = ["module"], default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.0", features = ["full"] }
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.12", features = ["json"] }
 
 [features]
 default = ["luajit"]
@@ -23,7 +23,7 @@ lua51 = ["mlua/lua51"]
 luajit = ["mlua/luajit"]
 
 [dev-dependencies]
-tokio = { version = "1.0", features = ["full", "test-util"] }
+tokio = { version = "1.43", features = ["full", "test-util"] }
 
 [profile.release]
 opt-level = 3
