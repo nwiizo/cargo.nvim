@@ -226,7 +226,6 @@ mod tests {
     fn test_cargo_command_execution() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let cargo_commands = setup_test_commands();
-
         let result = rt.block_on(async { cargo_commands.cargo_help(&[]).await });
         assert!(result.is_ok());
     }
@@ -235,19 +234,15 @@ mod tests {
     fn test_invalid_command() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let cargo_commands = setup_test_commands();
-
-        let result = rt.block_on(async { 
-            cargo_commands.execute_cargo_command("invalid", &[]).await 
-        });
+        let result =
+            rt.block_on(async { cargo_commands.execute_cargo_command("invalid", &[]).await });
         assert!(result.is_err());
     }
 
     #[test]
     fn test_execute_method() {
         let cargo_commands = setup_test_commands();
-        let result = cargo_commands.execute(async { 
-            Ok::<_, LuaError>("test".to_string()) 
-        });
+        let result = cargo_commands.execute(async { Ok::<_, LuaError>("test".to_string()) });
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "test");
     }
@@ -256,19 +251,18 @@ mod tests {
     fn test_cargo_autodd() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let cargo_commands = setup_test_commands();
-
         let result = rt.block_on(async { cargo_commands.cargo_autodd(&[]).await });
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string().to_lowercase();
-        
-        // より柔軟なエラーメッセージのチェック
+
+        // More flexible error message checking
         assert!(
-            err_msg.contains("failed to check cargo commands") ||
-            err_msg.contains("cargo-autodd is not installed") ||
-            err_msg.contains("no valid version found") ||
-            err_msg.contains("cargo autodd failed") ||
-            err_msg.contains("command not found") ||  // Docker環境用
-            err_msg.contains("no such file or directory"),  // Docker環境用
+            err_msg.contains("failed to check cargo commands")
+                || err_msg.contains("cargo-autodd is not installed")
+                || err_msg.contains("no valid version found")
+                || err_msg.contains("cargo autodd failed")
+                || err_msg.contains("command not found") // For Docker environment
+                || err_msg.contains("no such file or directory"), // For Docker environment
             "Unexpected error message: {}",
             err_msg
         );
@@ -278,7 +272,6 @@ mod tests {
     fn test_cargo_autodd_with_args() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let cargo_commands = setup_test_commands();
-
         let test_args = vec![
             vec!["update"],
             vec!["report"],
@@ -291,15 +284,15 @@ mod tests {
             let result = rt.block_on(async { cargo_commands.cargo_autodd(&args).await });
             assert!(result.is_err());
             let err_msg = result.unwrap_err().to_string().to_lowercase();
-            
+
             assert!(
-                err_msg.contains("failed to check cargo commands") ||
-                err_msg.contains("cargo-autodd is not installed") ||
-                err_msg.contains("no valid version found") ||
-                err_msg.contains("cargo autodd failed") ||
-                err_msg.contains("command not found") ||  // Docker環境用
-                err_msg.contains("no such file or directory") ||  // Docker環境用
-                err_msg.contains("status code 404"),
+                err_msg.contains("failed to check cargo commands")
+                    || err_msg.contains("cargo-autodd is not installed")
+                    || err_msg.contains("no valid version found")
+                    || err_msg.contains("cargo autodd failed")
+                    || err_msg.contains("command not found") // For Docker environment
+                    || err_msg.contains("no such file or directory") // For Docker environment
+                    || err_msg.contains("status code 404"),
                 "Unexpected error message: {}",
                 err_msg
             );
