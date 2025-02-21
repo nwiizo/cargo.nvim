@@ -221,8 +221,8 @@ local function process_output(output)
 	end
 
 	local result = {}
-	-- Split output into lines and process each one
-	for _, line in ipairs(vim.split(output, "\n", { trimempty = true })) do
+	-- Split output into lines and process each line
+	for line in output:gmatch("[^\r\n]+") do
 		local formatted = format_line(line, true)
 		if formatted then
 			table.insert(result, formatted)
@@ -260,6 +260,7 @@ local function execute_command(cmd_name, args, opts)
 	local args_str = #args > 0 and (" " .. table.concat(args, " ")) or ""
 	local cmd_line = string.format("cargo %s%s", cmd_name, args_str)
 
+	-- Initial buffer content
 	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
 		"@command@" .. cmd_line,
 		string.rep("─", vim.api.nvim_win_get_width(winnr) - 2),
@@ -276,9 +277,12 @@ local function execute_command(cmd_name, args, opts)
 	end)
 
 	if ok then
+		-- Process and display output line by line
 		local lines = process_output(result)
 		for _, line in ipairs(lines) do
-			vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, { line })
+			if type(line) == "string" then
+				vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, { line })
+			end
 		end
 
 		-- Add completion message
@@ -296,10 +300,11 @@ local function execute_command(cmd_name, args, opts)
 			end, opts.close_timeout)
 		end
 	else
+		-- Handle error
 		vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
 			"",
 			string.rep("─", vim.api.nvim_win_get_width(winnr) - 2),
-			"@error@" .. tostring(result),
+			"@error@" .. tostring(result):gsub("\n", " "),  -- Replace newlines with spaces
 		})
 		debug_print("Command failed:", tostring(result))
 	end
