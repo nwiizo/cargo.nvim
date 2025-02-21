@@ -1,10 +1,13 @@
 [package]
 name = "cargo-nvim"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
-authors = ["Your Name"]
+authors = ["nwiizo <nwiizo@gmail.com>"]
 description = "A Neovim plugin for Rust Cargo commands"
 license = "MIT"
+repository = "https://github.com/nwiizo/cargo.nvim"
+keywords = ["neovim", "rust", "cargo", "plugin"]
+categories = ["development-tools", "development-tools::cargo-plugins"]
 
 [lib]
 name = "cargo_nvim"
