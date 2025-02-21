@@ -13,7 +13,7 @@ end
 local default_opts = {
 	debug = false,
 	float_window = true,
-	window_width = 0.85,
+	window_width = 0.8,
 	window_height = 0.8,
 	border = "rounded",
 	auto_close = true,
@@ -21,6 +21,7 @@ local default_opts = {
 	show_line_numbers = true,
 	show_cursor_line = true,
 	wrap_output = false,
+	show_progress = true,
 
 	commands = {
 		bench = { nargs = "*", desc = "Run benchmarks" },
@@ -46,6 +47,7 @@ local default_opts = {
 		vendor = { nargs = "*", desc = "Vendor dependencies" },
 		audit = { nargs = "*", desc = "Audit dependencies" },
 		outdated = { nargs = "*", desc = "Check outdated deps" },
+		autodd = { nargs = "*", desc = "Auto-manage dependencies" },
 	},
 
 	keymaps = {

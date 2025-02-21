@@ -99,6 +99,7 @@ use {
 - ▶️ `:CargoRun` - Run the project
 - 🧪 `:CargoTest` - Run tests
 - 🔄 `:CargoUpdate` - Update dependencies
+- 🤖 `:CargoAutodd [args...]` - Automatically manage dependencies
 
 ## ⚙️ Configuration
 

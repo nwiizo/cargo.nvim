@@ -161,6 +161,12 @@ pub fn register_commands(lua: &Lua) -> LuaResult<LuaTable> {
                 cmd.execute(async { cmd.cargo_outdated(args).await })
             }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
         ),
+        (
+            "autodd",
+            Box::new(move |cmd: &CargoCommands, args: &[&str]| {
+                cmd.execute(async { cmd.cargo_autodd(args).await })
+            }) as Box<dyn Fn(&CargoCommands, &[&str]) -> LuaResult<String> + Send>,
+        ),
     ];
 
     // Register all commands to the Lua environment

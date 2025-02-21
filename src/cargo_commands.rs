@@ -194,6 +194,24 @@ impl CargoCommands {
     pub async fn cargo_help(&self, args: &[&str]) -> LuaResult<String> {
         self.execute_cargo_command("help", args).await
     }
+
+    /// Run cargo-autodd command
+    pub async fn cargo_autodd(&self, args: &[&str]) -> LuaResult<String> {
+        // Check if cargo-autodd is installed
+        let check_output = Command::new("cargo")
+            .arg("--list")
+            .output()
+            .map_err(|e| LuaError::RuntimeError(format!("Failed to check cargo commands: {}", e)))?;
+        
+        let output_str = String::from_utf8_lossy(&check_output.stdout);
+        if !output_str.contains("autodd") {
+            return Err(LuaError::RuntimeError(
+                "cargo-autodd is not installed. Please install it with 'cargo install cargo-autodd'".to_string()
+            ));
+        }
+
+        self.execute_cargo_command("autodd", args).await
+    }
 }
 
 #[cfg(test)]
@@ -231,5 +249,58 @@ mod tests {
         let result = cargo_commands.execute(async { Ok::<_, LuaError>("test".to_string()) });
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "test");
+    }
+
+    #[test]
+    fn test_cargo_autodd() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let cargo_commands = setup_test_commands();
+
+        // Test when cargo-autodd is not installed
+        let result = rt.block_on(async { cargo_commands.cargo_autodd(&[]).await });
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Failed to check cargo commands") || 
+            err_msg.contains("cargo-autodd is not installed") ||
+            err_msg.contains("No valid version found") ||
+            err_msg.contains("cargo autodd failed"),
+            "Unexpected error message: {}",
+            err_msg
+        );
+
+        // Test with arguments
+        let result = rt.block_on(async { cargo_commands.cargo_autodd(&["--debug"]).await });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cargo_autodd_with_args() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let cargo_commands = setup_test_commands();
+
+        // Test with various argument combinations
+        let test_args = vec![
+            vec!["update"],
+            vec!["report"],
+            vec!["security"],
+            vec!["--debug"],
+            vec!["update", "--debug"],
+        ];
+
+        for args in test_args {
+            let result = rt.block_on(async { cargo_commands.cargo_autodd(&args).await });
+            assert!(result.is_err());
+            let err_msg = result.unwrap_err().to_string();
+            assert!(
+                err_msg.contains("Failed to check cargo commands") || 
+                err_msg.contains("cargo-autodd is not installed") ||
+                err_msg.contains("No valid version found") ||
+                err_msg.contains("cargo autodd failed") ||
+                err_msg.contains("status code 404"),
+                "Unexpected error message: {}",
+                err_msg
+            );
+        }
     }
 }
