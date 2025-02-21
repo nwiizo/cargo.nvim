@@ -96,10 +96,10 @@ use {
 - 🧹 `:CargoClean` - Remove generated artifacts 
 - 📚 `:CargoDoc` - Generate project documentation
 - ✨ `:CargoNew` - Create a new Cargo project
-- ▶️ `:CargoRun` - Run the project
+- ▶️  `:CargoRun` - Run the project
 - 🧪 `:CargoTest` - Run tests
 - 🔄 `:CargoUpdate` - Update dependencies
-- 🤖 `:CargoAutodd [args...]` - Automatically manage dependencies
+- 🤖 `:CargoAutodd` - Automatically manage dependencies
 
 ## ⚙️ Configuration
 
@@ -154,3 +154,7 @@ MIT License - see the [LICENSE](LICENSE) file for details.
 ## 💝 Acknowledgements
 
 This plugin is inspired by various Neovim plugins and the Rust community.
+
+## 🎉 Related Projects
+
+- [cargo-autodd](https://github.com/nwiizo/cargo-autodd)
