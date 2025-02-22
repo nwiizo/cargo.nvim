@@ -304,7 +304,7 @@ local function execute_command(cmd_name, args, opts)
 		vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
 			"",
 			string.rep("─", vim.api.nvim_win_get_width(winnr) - 2),
-			"@error@" .. tostring(result):gsub("\n", " "),  -- Replace newlines with spaces
+			"@error@" .. tostring(result):gsub("\n", " "), -- Replace newlines with spaces
 		})
 		debug_print("Command failed:", tostring(result))
 	end
