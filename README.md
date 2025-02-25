@@ -88,6 +88,11 @@ use {
 
 - 💻 Neovim >= 0.9.0
 - 🦀 Rust and Cargo installed on your system
+- 📚 Additional dependencies:
+  - **Ubuntu/Debian:** `libluajit-5.1-dev` (Install with `sudo apt install libluajit-5.1-dev`)
+  - For other Linux distributions, you may need to install an equivalent LuaJIT development package
+
+If you encounter build errors mentioning `lluajit-5.1` during installation, you likely need to install the LuaJIT development package for your system.
 
 ## 🛠️ Available Commands
 
