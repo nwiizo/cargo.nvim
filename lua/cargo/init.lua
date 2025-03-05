@@ -61,6 +61,36 @@ local default_opts = {
 		copy_output = "y",
 		clear_output = "c",
 	},
+
+	-- Timeout settings
+	timeouts = {
+		default = 300,  -- Default timeout in seconds
+		run = 600,      -- Longer timeout for cargo run
+		test = 600,     -- Longer timeout for cargo test
+		bench = 900,    -- Longer timeout for cargo bench
+		build = 600,    -- Longer timeout for cargo build
+	},
+
+	-- Process monitoring
+	process_monitoring = {
+		enabled = true,
+		check_interval = 5,     -- Check process status every 5 seconds
+		memory_limit = 1024,    -- Memory limit in MB
+		cpu_limit = 90,         -- CPU usage limit in percentage
+	},
+
+	-- Interactive mode settings
+	interactive = {
+		enabled = true,
+		prompt_patterns = {
+			"^%s*>%s*$",          -- Basic prompt
+			"^%s*%[y/N%]:%s*$",   -- Yes/No prompt
+			"^%s*Password:%s*$",   -- Password prompt
+			"^%s*Input:%s*$",     -- Generic input prompt
+		},
+		input_field_height = 1,
+		history_size = 50,
+	},
 }
 
 -- Load Cargo library
@@ -232,6 +262,67 @@ local function process_output(output)
 	return result
 end
 
+-- Create input field for interactive mode
+local function create_input_field(bufnr, winnr, opts)
+	local input_bufnr = vim.api.nvim_create_buf(false, true)
+	local input_height = opts.interactive.input_field_height
+	local input_width = vim.api.nvim_win_get_width(winnr)
+
+	local input_win = vim.api.nvim_open_win(input_bufnr, true, {
+		relative = 'win',
+		win = winnr,
+		row = vim.api.nvim_win_get_height(winnr) - input_height,
+		col = 0,
+		width = input_width,
+		height = input_height,
+		style = 'minimal',
+		border = 'single',
+		title = "Input",
+		title_pos = "center",
+	})
+
+	-- Set input buffer options
+	vim.api.nvim_buf_set_option(input_bufnr, 'modifiable', true)
+	vim.api.nvim_buf_set_option(input_bufnr, 'buftype', 'prompt')
+
+	-- Set up prompt callback
+	vim.fn.prompt_setcallback(input_bufnr, function(input)
+		-- Send input to the process
+		if cargo_lib and cargo_lib.send_input then
+			cargo_lib.send_input(input .. "\n")
+			
+			-- 入力履歴をメインバッファに表示
+			vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
+			vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
+				"@info@Input: " .. input
+			})
+			vim.api.nvim_buf_set_option(bufnr, "modifiable", false)
+			
+			-- 入力後にプロンプトをクリア
+			vim.api.nvim_buf_set_lines(input_bufnr, 0, -1, false, {})
+		end
+	end)
+
+	-- プロンプト設定
+	vim.fn.prompt_setprompt(input_bufnr, "Input> ")
+	
+	-- 入力フィールドにフォーカス
+	vim.api.nvim_set_current_win(input_win)
+	vim.cmd("startinsert")
+
+	return input_bufnr, input_win
+end
+
+-- Check for prompt patterns in output
+local function check_for_prompt(line, patterns)
+	for _, pattern in ipairs(patterns) do
+		if line:match(pattern) then
+			return true
+		end
+	end
+	return false
+end
+
 -- Execute Cargo command
 local function execute_command(cmd_name, args, opts)
 	-- Save all modified buffers before executing command
@@ -267,6 +358,9 @@ local function execute_command(cmd_name, args, opts)
 		"",
 	})
 
+	-- Get timeout for the command
+	local timeout = opts.timeouts[cmd_name] or opts.timeouts.default
+
 	-- Execute command
 	local ok, result = pcall(function()
 		if #args > 0 then
@@ -277,36 +371,89 @@ local function execute_command(cmd_name, args, opts)
 	end)
 
 	if ok then
-		-- Process and display output line by line
-		local lines = process_output(result)
+		local output, is_interactive = unpack(result)
+		
+		-- 出力の処理
+		local lines = process_output(output)
 		for _, line in ipairs(lines) do
 			if type(line) == "string" then
 				vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, { line })
 			end
 		end
 
-		-- Add completion message
-		vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
-			"",
-			string.rep("─", vim.api.nvim_win_get_width(winnr) - 2),
-			"@success@Command completed successfully",
-		})
-
-		if opts.auto_close then
-			vim.defer_fn(function()
-				if vim.api.nvim_win_is_valid(winnr) then
-					vim.api.nvim_win_close(winnr, true)
+		-- インタラクティブモードの場合は自動クローズを無効化
+		if is_interactive then
+			-- ステータスラインの更新
+			vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
+				"",
+				"@info@Interactive mode active - Enter your input below",
+				"@info@Press Ctrl+C to terminate the process",
+			})
+			
+			-- 入力フィールドを作成（すべてのインタラクティブコマンドで有効）
+			local input_bufnr, input_win = create_input_field(bufnr, winnr, opts)
+			
+			-- 入力フィールドが閉じられたときにメインウィンドウにフォーカスを戻す
+			vim.api.nvim_buf_attach(input_bufnr, false, {
+				on_detach = function()
+					if vim.api.nvim_win_is_valid(winnr) then
+						vim.api.nvim_set_current_win(winnr)
+					end
 				end
-			end, opts.close_timeout)
+			})
+		else
+			-- 通常モードの場合は自動クローズを有効化
+			if opts.auto_close then
+				vim.defer_fn(function()
+					if vim.api.nvim_win_is_valid(winnr) then
+						vim.api.nvim_win_close(winnr, true)
+					end
+				end, opts.close_timeout)
+			end
+		end
+
+		-- Monitor process if enabled
+		if opts.process_monitoring.enabled then
+			local monitor_timer = vim.loop.new_timer()
+			monitor_timer:start(0, opts.process_monitoring.check_interval * 1000, vim.schedule_wrap(function()
+				-- Check process status
+				local process_info = vim.loop.get_process_stats(pid)
+				if process_info then
+					-- Check memory usage
+					if process_info.memory > opts.process_monitoring.memory_limit * 1024 * 1024 then
+						cargo_lib.interrupt()
+						vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
+							"@error@Process terminated: Memory limit exceeded",
+						})
+					end
+
+					-- Check CPU usage
+					if process_info.cpu > opts.process_monitoring.cpu_limit then
+						cargo_lib.interrupt()
+						vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
+							"@error@Process terminated: CPU limit exceeded",
+						})
+					end
+				end
+			end))
+
+			-- Clean up timer when command completes
+			vim.api.nvim_buf_attach(bufnr, false, {
+				on_detach = function()
+					if monitor_timer then
+						monitor_timer:stop()
+						monitor_timer:close()
+					end
+				end
+			})
 		end
 	else
-		-- Handle error
+		-- エラー処理
 		vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
 			"",
 			string.rep("─", vim.api.nvim_win_get_width(winnr) - 2),
-			"@error@" .. tostring(result):gsub("\n", " "), -- Replace newlines with spaces
+			"@error@" .. tostring(result):gsub("\n", " "),
 		})
-		debug_print("Command failed:", tostring(result))
 	end
 
 	vim.api.nvim_buf_set_option(bufnr, "modifiable", false)
