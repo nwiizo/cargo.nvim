@@ -1,6 +1,6 @@
 [package]
 name = "cargo-nvim"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 authors = ["nwiizo <nwiizo@gmail.com>"]
 description = "A Neovim plugin for Rust Cargo commands"
