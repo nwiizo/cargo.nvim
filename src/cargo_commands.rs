@@ -1,14 +1,14 @@
 // src/cargo_commands.rs
+use crate::lua_exports::set_input_sender;
 use mlua::prelude::*;
+use std::process::Stdio;
 use std::sync::Arc;
-use tokio::runtime::Runtime;
 use std::time::Duration;
-use tokio::time::timeout;
-use std::process::{Stdio};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command as TokioCommand;
+use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
-use crate::lua_exports::set_input_sender;
+use tokio::time::timeout;
 
 /// Structure for handling Cargo commands
 /// Contains a runtime for async operations
@@ -41,14 +41,24 @@ impl CargoCommands {
     /// Execute a Cargo command with the given arguments
     #[cfg(not(test))]
     #[allow(dead_code)]
-    async fn execute_cargo_command(&self, command: &str, args: &[&str]) -> LuaResult<(String, bool)> {
-        self.execute_cargo_command_internal(command, args, None).await
+    async fn execute_cargo_command(
+        &self,
+        command: &str,
+        args: &[&str],
+    ) -> LuaResult<(String, bool)> {
+        self.execute_cargo_command_internal(command, args, None)
+            .await
     }
 
     /// Execute a Cargo command with the given arguments (public for testing)
     #[cfg(test)]
-    pub async fn execute_cargo_command(&self, command: &str, args: &[&str]) -> LuaResult<(String, bool)> {
-        self.execute_cargo_command_internal(command, args, None).await
+    pub async fn execute_cargo_command(
+        &self,
+        command: &str,
+        args: &[&str],
+    ) -> LuaResult<(String, bool)> {
+        self.execute_cargo_command_internal(command, args, None)
+            .await
     }
 
     /// Execute a Cargo command with timeout and interactive mode support
@@ -104,11 +114,12 @@ impl CargoCommands {
             }
 
             // インタラクティブモードの検出パターン
-            if line.contains("? [Y/n]") || 
-               line.contains("Enter password:") ||
-               line.contains("> ") ||
-               line.contains("[1/3]") ||
-               line.ends_with("? ") {
+            if line.contains("? [Y/n]")
+                || line.contains("Enter password:")
+                || line.contains("> ")
+                || line.contains("[1/3]")
+                || line.ends_with("? ")
+            {
                 is_interactive = true;
             }
 
@@ -135,9 +146,11 @@ impl CargoCommands {
         if let Some(duration) = timeout_duration {
             match timeout(duration, child.wait()).await {
                 Ok(status) => {
-                    if !status.map_err(|e| {
-                        LuaError::RuntimeError(format!("Process error: {}", e))
-                    })?.success() && !is_interactive {
+                    if !status
+                        .map_err(|e| LuaError::RuntimeError(format!("Process error: {}", e)))?
+                        .success()
+                        && !is_interactive
+                    {
                         stdin_task.abort();
                         return Err(LuaError::RuntimeError(format!(
                             "cargo {} failed: {}",
@@ -151,7 +164,7 @@ impl CargoCommands {
                         "cargo {} timed out after {} seconds",
                         command,
                         duration.as_secs()
-                    )))
+                    )));
                 }
             }
         } else {
@@ -170,22 +183,26 @@ impl CargoCommands {
 
         // 一時的なパッチ: cargo checkは常に成功を返す
         if command == "check" && output.trim().is_empty() {
-            output = "Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s".to_string();
+            output =
+                "Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s".to_string();
         }
 
         stdin_task.abort();
         Ok((output, is_interactive))
     }
-    
+
     /// Check the project for errors
     pub async fn cargo_check(&self, args: &[&str]) -> LuaResult<(String, bool)> {
-        let result = self.execute_cargo_command_internal("check", args, None).await;
-        
+        let result = self
+            .execute_cargo_command_internal("check", args, None)
+            .await;
+
         // If the command executed successfully but the output is empty, provide a default message
         match result {
-            Ok((output, interactive)) if output.trim().is_empty() => {
-                Ok(("Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s".to_string(), interactive))
-            },
+            Ok((output, interactive)) if output.trim().is_empty() => Ok((
+                "Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s".to_string(),
+                interactive,
+            )),
             other => other,
         }
     }
@@ -197,13 +214,15 @@ impl CargoCommands {
         args: &[&str],
     ) -> LuaResult<(String, bool)> {
         // 特定のコマンドは常にインタラクティブモードとして扱う
-        let result = self.execute_cargo_command_internal(command, args, None).await?;
-        
+        let result = self
+            .execute_cargo_command_internal(command, args, None)
+            .await?;
+
         // run コマンドは常にインタラクティブモードとして扱う
         if command == "run" {
             return Ok((result.0, true));
         }
-        
+
         Ok(result)
     }
 
@@ -220,10 +239,12 @@ impl CargoCommands {
     /// Run the project
     pub async fn cargo_run(&self, args: &[&str]) -> LuaResult<(String, bool)> {
         // proconio などの入力待ちプログラムはインタラクティブモードとして扱う
-        self.execute_cargo_command_internal("run", args, None).await.map(|(output, _)| {
-            // 入力待ちの可能性が高いプログラムは常にインタラクティブとして扱う
-            (output, true)
-        })
+        self.execute_cargo_command_internal("run", args, None)
+            .await
+            .map(|(output, _)| {
+                // 入力待ちの可能性が高いプログラムは常にインタラクティブとして扱う
+                (output, true)
+            })
     }
 
     /// Run the tests
@@ -233,7 +254,8 @@ impl CargoCommands {
 
     /// Clean the target directory
     pub async fn cargo_clean(&self, args: &[&str]) -> LuaResult<(String, bool)> {
-        self.execute_cargo_command_internal("clean", args, None).await
+        self.execute_cargo_command_internal("clean", args, None)
+            .await
     }
 
     /// Generate documentation
@@ -245,19 +267,22 @@ impl CargoCommands {
     pub async fn cargo_new(&self, name: &str, args: &[&str]) -> LuaResult<(String, bool)> {
         let mut full_args = vec![name];
         full_args.extend_from_slice(args);
-        self.execute_cargo_command_internal("new", &full_args, None).await
+        self.execute_cargo_command_internal("new", &full_args, None)
+            .await
     }
 
     /// Update dependencies
     pub async fn cargo_update(&self, args: &[&str]) -> LuaResult<(String, bool)> {
-        self.execute_cargo_command_internal("update", args, None).await
+        self.execute_cargo_command_internal("update", args, None)
+            .await
     }
 
     // Additional Cargo Commands
 
     /// Initialize a new package in an existing directory
     pub async fn cargo_init(&self, args: &[&str]) -> LuaResult<(String, bool)> {
-        self.execute_cargo_command_internal("init", args, None).await
+        self.execute_cargo_command_internal("init", args, None)
+            .await
     }
 
     /// Add dependencies to a manifest file
@@ -267,7 +292,8 @@ impl CargoCommands {
 
     /// Remove dependencies from a manifest file
     pub async fn cargo_remove(&self, args: &[&str]) -> LuaResult<(String, bool)> {
-        self.execute_cargo_command_internal("remove", args, None).await
+        self.execute_cargo_command_internal("remove", args, None)
+            .await
     }
 
     /// Format Rust code
@@ -277,7 +303,8 @@ impl CargoCommands {
 
     /// Run the Clippy linter
     pub async fn cargo_clippy(&self, args: &[&str]) -> LuaResult<(String, bool)> {
-        self.execute_cargo_command_internal("clippy", args, None).await
+        self.execute_cargo_command_internal("clippy", args, None)
+            .await
     }
 
     /// Automatically fix lint warnings
@@ -287,47 +314,56 @@ impl CargoCommands {
 
     /// Package and upload crate to registry
     pub async fn cargo_publish(&self, args: &[&str]) -> LuaResult<(String, bool)> {
-        self.execute_cargo_command_internal("publish", args, None).await
+        self.execute_cargo_command_internal("publish", args, None)
+            .await
     }
 
     /// Install a Rust binary
     pub async fn cargo_install(&self, args: &[&str]) -> LuaResult<(String, bool)> {
-        self.execute_cargo_command_internal("install", args, None).await
+        self.execute_cargo_command_internal("install", args, None)
+            .await
     }
 
     /// Uninstall a Rust binary
     pub async fn cargo_uninstall(&self, args: &[&str]) -> LuaResult<(String, bool)> {
-        self.execute_cargo_command_internal("uninstall", args, None).await
+        self.execute_cargo_command_internal("uninstall", args, None)
+            .await
     }
 
     /// Search packages in registry
     pub async fn cargo_search(&self, args: &[&str]) -> LuaResult<(String, bool)> {
-        self.execute_cargo_command_internal("search", args, None).await
+        self.execute_cargo_command_internal("search", args, None)
+            .await
     }
 
     /// Display dependency tree
     pub async fn cargo_tree(&self, args: &[&str]) -> LuaResult<(String, bool)> {
-        self.execute_cargo_command_internal("tree", args, None).await
+        self.execute_cargo_command_internal("tree", args, None)
+            .await
     }
 
     /// Vendor all dependencies locally
     pub async fn cargo_vendor(&self, args: &[&str]) -> LuaResult<(String, bool)> {
-        self.execute_cargo_command_internal("vendor", args, None).await
+        self.execute_cargo_command_internal("vendor", args, None)
+            .await
     }
 
     /// Audit dependencies for security vulnerabilities
     pub async fn cargo_audit(&self, args: &[&str]) -> LuaResult<(String, bool)> {
-        self.execute_cargo_command_internal("audit", args, None).await
+        self.execute_cargo_command_internal("audit", args, None)
+            .await
     }
 
     /// Show outdated dependencies
     pub async fn cargo_outdated(&self, args: &[&str]) -> LuaResult<(String, bool)> {
-        self.execute_cargo_command_internal("outdated", args, None).await
+        self.execute_cargo_command_internal("outdated", args, None)
+            .await
     }
 
     /// Get Cargo help
     pub async fn cargo_help(&self, args: &[&str]) -> LuaResult<(String, bool)> {
-        self.execute_cargo_command_internal("help", args, None).await
+        self.execute_cargo_command_internal("help", args, None)
+            .await
     }
 
     /// Run cargo-autodd command
@@ -343,9 +379,12 @@ impl CargoCommands {
         #[cfg(not(test))]
         {
             // Check if cargo-autodd is installed
-            let check_output = std::process::Command::new("cargo").arg("--list").output().map_err(|e| {
-                LuaError::RuntimeError(format!("Failed to check cargo commands: {}", e))
-            })?;
+            let check_output = std::process::Command::new("cargo")
+                .arg("--list")
+                .output()
+                .map_err(|e| {
+                    LuaError::RuntimeError(format!("Failed to check cargo commands: {}", e))
+                })?;
 
             let output_str = String::from_utf8_lossy(&check_output.stdout);
             if !output_str.contains("autodd") {
@@ -355,7 +394,8 @@ impl CargoCommands {
                 ));
             }
 
-            self.execute_cargo_command_internal("autodd", _args, None).await
+            self.execute_cargo_command_internal("autodd", _args, None)
+                .await
         }
     }
 }
@@ -388,7 +428,8 @@ mod tests {
     #[test]
     fn test_execute_method() {
         let cargo_commands = setup_test_commands();
-        let result = cargo_commands.execute(async { Ok::<_, LuaError>(("test".to_string(), false)) });
+        let result =
+            cargo_commands.execute(async { Ok::<_, LuaError>(("test".to_string(), false)) });
         assert!(result.is_ok());
         assert_eq!(result.unwrap().0, "test");
     }

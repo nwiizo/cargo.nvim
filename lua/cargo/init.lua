@@ -314,8 +314,9 @@ local function process_output(output)
 			or line:match("^%s*Running")
 			or line:match("^%s*Compiling")
 		then
-			-- Already handled above
-			-- Cargo-specific messages go into cargo_messages
+			-- Skip these as they're already handled above
+			local _ = true
+		-- Cargo-specific messages go into cargo_messages
 		elseif
 			line:match("^%s*error")
 			or line:match("^%s*warning")
@@ -396,17 +397,7 @@ local function create_input_field(bufnr, winnr, opts)
 	vim.api.nvim_set_current_win(input_win)
 	vim.cmd("startinsert")
 
-	return input_bufnr, input_win
-end
-
--- Check for prompt patterns in output
-local function check_for_prompt(line, patterns)
-	for _, pattern in ipairs(patterns) do
-		if line:match(pattern) then
-			return true
-		end
-	end
-	return false
+	return input_bufnr
 end
 
 -- Execute Cargo command
@@ -443,9 +434,6 @@ local function execute_command(cmd_name, args, opts)
 		string.rep("─", vim.api.nvim_win_get_width(winnr) - 2),
 		"",
 	})
-
-	-- Get timeout for the command
-	local timeout = opts.timeouts[cmd_name] or opts.timeouts.default
 
 	-- Execute command
 	local ok, result = pcall(function()
@@ -496,13 +484,13 @@ local function execute_command(cmd_name, args, opts)
 			-- Make sure buffer is modifiable
 			vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
 
-			local result = process_output(output)
-			debug_print("Processed program output lines:", #result.program_output)
-			debug_print("Processed cargo message lines:", #result.cargo_messages)
+			local processed_output = process_output(output)
+			debug_print("Processed program output lines:", #processed_output.program_output)
+			debug_print("Processed cargo message lines:", #processed_output.cargo_messages)
 
 			-- First display the program output (if any)
-			if #result.program_output > 0 then
-				for _, line in ipairs(result.program_output) do
+			if #processed_output.program_output > 0 then
+				for _, line in ipairs(processed_output.program_output) do
 					vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, { line })
 				end
 
@@ -514,7 +502,7 @@ local function execute_command(cmd_name, args, opts)
 			end
 
 			-- Then display cargo messages (if any)
-			for _, line in ipairs(result.cargo_messages) do
+			for _, line in ipairs(processed_output.cargo_messages) do
 				vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, { line })
 			end
 		end
@@ -535,7 +523,7 @@ local function execute_command(cmd_name, args, opts)
 			})
 
 			-- 入力フィールドを作成（すべてのインタラクティブコマンドで有効）
-			local input_bufnr, input_win = create_input_field(bufnr, winnr, opts)
+			local input_bufnr = create_input_field(bufnr, winnr, opts)
 
 			-- 入力フィールドが閉じられたときにメインウィンドウにフォーカスを戻す
 			vim.api.nvim_buf_attach(input_bufnr, false, {
