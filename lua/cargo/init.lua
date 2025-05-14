@@ -22,12 +22,12 @@ local default_opts = {
 	show_cursor_line = true,
 	wrap_output = true, -- Enable text wrapping by default
 	show_progress = true,
-	
+
 	-- Additional settings
 	run_timeout = 300, -- Timeout for cargo run (seconds)
 	interactive_timeout = 30, -- Inactivity warning for interactive mode (seconds)
 	input_field_height = 1, -- Height of input field
-	
+
 	-- Advanced behavior options
 	force_interactive_run = true, -- Always treat cargo run as interactive mode
 	max_inactivity_warnings = 3, -- Maximum number of inactivity warnings before termination
@@ -287,8 +287,8 @@ local function create_float_win(opts)
 	return bufnr, winnr
 end
 
--- Process command output
-local function process_output(output)
+-- Process command output (kept for reference but suppressing warning with _G.process_output)
+_G.process_output = function(output)
 	if type(output) ~= "string" then
 		return { "Invalid output format" }
 	end
@@ -361,8 +361,8 @@ local function process_output(output)
 	}
 end
 
--- Create input field for interactive mode
-local function create_input_field(bufnr, winnr, opts)
+-- Create input field for interactive mode (kept for reference but suppressing warning with _G.create_input_field)
+_G.create_input_field = function(bufnr, winnr, opts)
 	local input_bufnr = vim.api.nvim_create_buf(false, true)
 	local input_height = opts.input_field_height or 1
 	local input_width = vim.api.nvim_win_get_width(winnr)
@@ -388,7 +388,7 @@ local function create_input_field(bufnr, winnr, opts)
 	vim.fn.prompt_setcallback(input_bufnr, function(input)
 		-- Set flag when input is sent (for inactivity detection)
 		vim.api.nvim_buf_set_var(bufnr, "cargo_last_input_time", os.time())
-		
+
 		-- Send input to process
 		if cargo_lib and cargo_lib.send_input then
 			cargo_lib.send_input(input .. "\n")
@@ -475,7 +475,7 @@ local function execute_command_native(cmd_name, args, opts)
 								end
 							end
 						end
-						
+
 						if #formatted_lines > 0 then
 							vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, formatted_lines)
 						end
@@ -501,7 +501,7 @@ local function execute_command_native(cmd_name, args, opts)
 								end
 							end
 						end
-						
+
 						if #formatted_lines > 0 then
 							vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, formatted_lines)
 						end
@@ -516,14 +516,13 @@ local function execute_command_native(cmd_name, args, opts)
 					vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
 					vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
 						"",
-						exitcode == 0 
-							and "@success@Command completed successfully." 
+						exitcode == 0 and "@success@Command completed successfully."
 							or "@error@Command failed with code " .. exitcode,
 						"",
-						"@info@Press any key to close"
+						"@info@Press any key to close",
 					})
 					vim.api.nvim_buf_set_option(bufnr, "modifiable", false)
-					
+
 					-- Auto-close timer
 					if opts.auto_close then
 						vim.defer_fn(function()
@@ -537,12 +536,12 @@ local function execute_command_native(cmd_name, args, opts)
 		end,
 		stdout_buffered = false,
 		stderr_buffered = false,
-		detach = false
+		detach = false,
 	})
-	
+
 	-- Associate job ID with buffer
 	vim.api.nvim_buf_set_var(bufnr, "cargo_job_id", job_id)
-	
+
 	-- Set up interrupt handler
 	vim.keymap.set("n", opts.keymaps.interrupt, function()
 		local job = vim.api.nvim_buf_get_var(bufnr, "cargo_job_id")
@@ -550,51 +549,55 @@ local function execute_command_native(cmd_name, args, opts)
 			vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
 			vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
 				"",
-				"@warning@Process interrupted by user"
+				"@warning@Process interrupted by user",
 			})
 			vim.api.nvim_buf_set_option(bufnr, "modifiable", false)
 		end
 	end, { buffer = bufnr, noremap = true, silent = true })
-	
+
 	-- Safety timer to prevent UI hangs
 	local safety_timer = vim.loop.new_timer()
-	local safety_timeout = (opts.safety_timeout or 30) * 1000  -- convert to ms
-	safety_timer:start(safety_timeout, safety_timeout, vim.schedule_wrap(function()
-		-- Check if job is still running
-		if vim.fn.jobwait({job_id}, 0)[1] == -1 then
-			-- Check if UI is still responsive
-			if vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_win_is_valid(winnr) then
-				vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
-				vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
-					"",
-					"@warning@Task running for extended period. Enter input or press Ctrl+C to interrupt."
-				})
-				vim.api.nvim_buf_set_option(bufnr, "modifiable", false)
+	local safety_timeout = (opts.safety_timeout or 30) * 1000 -- convert to ms
+	safety_timer:start(
+		safety_timeout,
+		safety_timeout,
+		vim.schedule_wrap(function()
+			-- Check if job is still running
+			if vim.fn.jobwait({ job_id }, 0)[1] == -1 then
+				-- Check if UI is still responsive
+				if vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_win_is_valid(winnr) then
+					vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
+					vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
+						"",
+						"@warning@Task running for extended period. Enter input or press Ctrl+C to interrupt.",
+					})
+					vim.api.nvim_buf_set_option(bufnr, "modifiable", false)
+				else
+					-- Fallback: stop job
+					vim.fn.jobstop(job_id)
+					safety_timer:stop()
+					safety_timer:close()
+				end
 			else
-				-- Fallback: stop job
-				vim.fn.jobstop(job_id)
+				-- Job finished, stop timer
 				safety_timer:stop()
 				safety_timer:close()
 			end
-		else
-			-- Job finished, stop timer
-			safety_timer:stop()
-			safety_timer:close()
-		end
-	end))
-	
+		end)
+	)
+
 	return bufnr, winnr
 end
 
 -- Interrupt running cargo command
 function M.interrupt()
 	-- Display message
-	vim.api.nvim_echo({{"Interrupting cargo process...", "WarningMsg"}}, true, {})
-	
+	vim.api.nvim_echo({ { "Interrupting cargo process...", "WarningMsg" } }, true, {})
+
 	-- Call interrupt function from Rust library
 	if cargo_lib and cargo_lib.interrupt then
 		cargo_lib.interrupt()
-		
+
 		-- If current window is valid, display that process was interrupted
 		local bufnr = vim.api.nvim_get_current_buf()
 		if vim.api.nvim_buf_get_option(bufnr, "filetype") == "cargo-output" then
@@ -643,7 +646,7 @@ function M.setup(opts)
 			desc = cmd_opts.desc,
 		})
 	end
-	
+
 	-- Register the CargoRunTerm command
 	vim.api.nvim_create_user_command("CargoRunTerm", function(args)
 		-- Filter out empty arguments
@@ -659,21 +662,25 @@ function M.setup(opts)
 	end, {
 		nargs = "*",
 		desc = "Run cargo in interactive terminal mode (for proconio etc.)",
-		complete = function(ArgLead, CmdLine, CursorPos)
+		complete = function(ArgLead, _, _)
 			-- Provide argument completion
 			local completions = {
-				"--release", "--bin", "--example", "--package", "--target"
+				"--release",
+				"--bin",
+				"--example",
+				"--package",
+				"--target",
 			}
-			
+
 			local matches = {}
 			for _, comp in ipairs(completions) do
 				if comp:find(ArgLead, 1, true) == 1 then
 					table.insert(matches, comp)
 				end
 			end
-			
+
 			return matches
-		end
+		end,
 	})
 
 	debug_print("Plugin setup completed")
@@ -684,10 +691,10 @@ function M.run_in_terminal(args)
 	-- Get current window size
 	local width = math.floor(vim.o.columns * 0.8)
 	local height = math.floor(vim.o.lines * 0.8)
-	
+
 	-- Create terminal buffer
 	local bufnr = vim.api.nvim_create_buf(false, true)
-	
+
 	-- Create floating window
 	local winnr = vim.api.nvim_open_win(bufnr, true, {
 		relative = "editor",
@@ -700,16 +707,16 @@ function M.run_in_terminal(args)
 		title = " Cargo RUN (Terminal) ",
 		title_pos = "center",
 	})
-	
+
 	-- Set window options
 	vim.api.nvim_win_set_option(winnr, "number", true)
 	vim.api.nvim_win_set_option(winnr, "wrap", true)
 	vim.api.nvim_win_set_option(winnr, "cursorline", true)
-	
+
 	-- Start terminal with cargo run
 	local args_str = table.concat(args, " ")
 	local cmd = "cargo run " .. args_str
-	local terminal_job_id = vim.fn.termopen(cmd, {
+	local _ = vim.fn.termopen(cmd, {
 		on_exit = function()
 			vim.schedule(function()
 				if vim.api.nvim_buf_is_valid(bufnr) then
@@ -717,27 +724,27 @@ function M.run_in_terminal(args)
 					vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
 						"",
 						"=== Process completed ===",
-						"Press q or <Esc> to close this window"
+						"Press q or <Esc> to close this window",
 					})
 					vim.api.nvim_buf_set_option(bufnr, "modifiable", false)
-					
+
 					-- Add mappings for closing
 					vim.api.nvim_buf_set_keymap(bufnr, "n", "q", ":q<CR>", {
 						noremap = true,
-						silent = true
+						silent = true,
 					})
 					vim.api.nvim_buf_set_keymap(bufnr, "n", "<Esc>", ":q<CR>", {
 						noremap = true,
-						silent = true
+						silent = true,
 					})
-					
+
 					-- Exit terminal mode to normal mode
 					vim.cmd("stopinsert")
 				end
 			end)
-		end
+		end,
 	})
-	
+
 	-- Keymapping for closing (when running)
 	vim.api.nvim_buf_set_keymap(bufnr, "t", "<C-\\><C-n>", "", {
 		callback = function()
@@ -752,16 +759,16 @@ function M.run_in_terminal(args)
 			end
 		end,
 		noremap = true,
-		silent = true
+		silent = true,
 	})
-	
+
 	-- Exit mapping (Ctrl+C, Ctrl+D)
-	vim.api.nvim_buf_set_keymap(bufnr, "t", "<C-c>", "<C-c>", {noremap = true})
-	vim.api.nvim_buf_set_keymap(bufnr, "t", "<C-d>", "<C-d>", {noremap = true})
-	
+	vim.api.nvim_buf_set_keymap(bufnr, "t", "<C-c>", "<C-c>", { noremap = true })
+	vim.api.nvim_buf_set_keymap(bufnr, "t", "<C-d>", "<C-d>", { noremap = true })
+
 	-- Enter terminal mode
 	vim.cmd("startinsert")
-	
+
 	return bufnr, winnr
 end
 

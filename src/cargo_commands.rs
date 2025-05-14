@@ -78,10 +78,10 @@ impl CargoCommands {
         // Always set a timeout (with default values)
         let command_timeout = timeout_duration.unwrap_or_else(|| {
             match command {
-                "run" => Duration::from_secs(300),  // 5 minutes
-                "test" => Duration::from_secs(300), // 5 minutes
+                "run" => Duration::from_secs(300),   // 5 minutes
+                "test" => Duration::from_secs(300),  // 5 minutes
                 "bench" => Duration::from_secs(600), // 10 minutes
-                _ => Duration::from_secs(120),      // 2 minutes
+                _ => Duration::from_secs(120),       // 2 minutes
             }
         });
 
@@ -96,19 +96,19 @@ impl CargoCommands {
         // Create buffered streams
         let mut stdout_reader = BufReader::new(stdout).lines();
         let mut stderr_reader = BufReader::new(stderr).lines();
-        
+
         // Interactive mode detection flag
         let mut is_interactive = false;
-        
+
         // Assume interactive mode based on command name
         if command == "run" {
             // Treat run command as interactive by default
             is_interactive = true;
         }
-        
+
         // Output buffer
         let mut output = String::new();
-        
+
         // Channel for standard input
         let (tx, mut rx) = mpsc::channel::<String>(32);
         set_input_sender(tx.clone());
@@ -123,7 +123,7 @@ impl CargoCommands {
                             eprintln!("Failed to flush stdin: {}", e);
                             break;
                         }
-                    },
+                    }
                     Err(e) => {
                         eprintln!("Failed to write to stdin: {}", e);
                         break;
@@ -136,12 +136,13 @@ impl CargoCommands {
         let output_handle = tokio::spawn(async move {
             let mut combined_output = String::new();
             let start_time = std::time::Instant::now();
-            
+
             // Output reading loop
             loop {
-                let timeout_remaining = command_timeout.checked_sub(start_time.elapsed())
-                                        .unwrap_or_else(|| Duration::from_secs(1));
-                
+                let timeout_remaining = command_timeout
+                    .checked_sub(start_time.elapsed())
+                    .unwrap_or_else(|| Duration::from_secs(1));
+
                 // Monitor both stdout and stderr simultaneously
                 tokio::select! {
                     // Reading standard output
@@ -150,16 +151,16 @@ impl CargoCommands {
                             Ok(Some(line)) => {
                                 // Detect interactive mode based on specific patterns
                                 if !is_interactive && (
-                                    line.contains("? [Y/n]") || 
-                                    line.contains("Enter password:") || 
-                                    line.contains("> ") || 
-                                    line.contains("[1/3]") || 
+                                    line.contains("? [Y/n]") ||
+                                    line.contains("Enter password:") ||
+                                    line.contains("> ") ||
+                                    line.contains("[1/3]") ||
                                     line.ends_with("? ") ||
                                     line.trim().is_empty() // Empty line may indicate interactive mode
                                 ) {
                                     is_interactive = true;
                                 }
-                                
+
                                 combined_output.push_str(&line);
                                 combined_output.push('\n');
                             },
@@ -167,7 +168,7 @@ impl CargoCommands {
                             Err(_) => break,
                         }
                     },
-                    
+
                     // Reading standard error
                     stderr_result = stderr_reader.next_line() => {
                         match stderr_result {
@@ -179,25 +180,27 @@ impl CargoCommands {
                             Err(_) => {},
                         }
                     },
-                    
+
                     // Timeout processing (only for non-interactive mode)
                     _ = tokio::time::sleep(timeout_remaining), if !is_interactive => {
                         return (combined_output, is_interactive, true); // Timeout
                     }
                 }
-                
+
                 // Check timeout (even for interactive mode)
                 if start_time.elapsed() >= command_timeout {
                     return (combined_output, is_interactive, true);
                 }
-                
+
                 // For interactive mode, use an extended timeout (3x normal timeout)
                 // but still terminate after excessive inactivity
-                if is_interactive && start_time.elapsed() >= Duration::from_secs(command_timeout.as_secs() * 3) {
+                if is_interactive
+                    && start_time.elapsed() >= Duration::from_secs(command_timeout.as_secs() * 3)
+                {
                     return (combined_output, is_interactive, true);
                 }
             }
-            
+
             (combined_output, is_interactive, false)
         });
 
@@ -217,7 +220,8 @@ impl CargoCommands {
         };
 
         // Get results from output processing task
-        let output_result = match tokio::time::timeout(Duration::from_secs(5), output_handle).await {
+        let output_result = match tokio::time::timeout(Duration::from_secs(5), output_handle).await
+        {
             Ok(Ok((out, interactive, _))) => (out, interactive),
             _ => (output, is_interactive),
         };
@@ -300,19 +304,21 @@ impl CargoCommands {
     /// Run the project
     pub async fn cargo_run(&self, args: &[&str]) -> LuaResult<(String, bool)> {
         // Designed to support interactive programs
-        let result = self.execute_cargo_command_internal("run", args, None).await?;
-        
+        let result = self
+            .execute_cargo_command_internal("run", args, None)
+            .await?;
+
         // Check if proconio is likely being used by examining Cargo.toml
         // This is important for competitive programming scenarios where proconio::input! is common
         let has_proconio = std::fs::read_to_string("Cargo.toml")
             .map(|content| content.contains("proconio"))
             .unwrap_or(false);
-        
+
         // If proconio is used, force interactive mode
         if has_proconio {
             return Ok((result.0, true));
         }
-        
+
         Ok(result)
     }
 
