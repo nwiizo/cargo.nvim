@@ -8,7 +8,6 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command as TokioCommand;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
-use tokio::time::timeout;
 
 /// Structure for handling Cargo commands
 /// Contains a runtime for async operations
@@ -107,7 +106,7 @@ impl CargoCommands {
         }
 
         // Output buffer
-        let mut output = String::new();
+        let output = String::new();
 
         // Channel for standard input
         let (tx, mut rx) = mpsc::channel::<String>(32);
