@@ -20,8 +20,13 @@ local default_opts = {
 	close_timeout = 30000,
 	show_line_numbers = true,
 	show_cursor_line = true,
-	wrap_output = false,
+	wrap_output = true, -- テキスト折り返しをデフォルトで有効化
 	show_progress = true,
+	
+	-- 新規オプション
+	run_timeout = 60, -- cargo run のタイムアウト（秒）
+	interactive_timeout = 30, -- インタラクティブモードでの無操作タイムアウト（秒）
+	force_smart_detection = true, -- 常にスマート検出を使用
 
 	commands = {
 		bench = { nargs = "*", desc = "Run benchmarks" },
@@ -510,28 +515,83 @@ local function execute_command(cmd_name, args, opts)
 		-- Add a minimum delay for short-running commands to ensure output is visible
 		local min_display_time = 1500 -- minimum 1.5 seconds display time
 
-		-- インタラクティブモードの場合は自動クローズを無効化
+		-- インタラクティブモードの場合の処理
 		if is_interactive then
+			-- インタラクティブモードでも、無操作の場合は自動クローズするタイマーを設定
+			local inactivity_timer
+			
+			if opts.auto_close then
+				inactivity_timer = vim.loop.new_timer()
+				inactivity_timer:start(opts.interactive_timeout * 1000, 0, vim.schedule_wrap(function()
+					if vim.api.nvim_win_is_valid(winnr) then
+						vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
+						vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
+							"",
+							"@info@Process seems inactive - closing window",
+						})
+						vim.defer_fn(function()
+							if vim.api.nvim_win_is_valid(winnr) then
+								vim.api.nvim_win_close(winnr, true)
+							end
+						end, 3000)
+					end
+					if inactivity_timer then
+						inactivity_timer:stop()
+						inactivity_timer:close()
+					end
+				end))
+			end
+			
+			-- バッファーにインタラクティブモード状態を記録（検出用）
+			vim.api.nvim_buf_set_var(bufnr, "cargo_interactive", true)
+			
 			-- Make sure buffer is modifiable
 			vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
-
+			
 			-- ステータスラインの更新
 			vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
 				"",
 				"@info@Interactive mode active - Enter your input below",
 				"@info@Press Ctrl+C to terminate the process",
 			})
-
-			-- 入力フィールドを作成（すべてのインタラクティブコマンドで有効）
+			
+			-- 入力フィールドを作成
 			local input_bufnr = create_input_field(bufnr, winnr, opts)
-
-			-- 入力フィールドが閉じられたときにメインウィンドウにフォーカスを戻す
+			
+			-- キー入力があった場合は無活動タイマーをリセット
 			vim.api.nvim_buf_attach(input_bufnr, false, {
+				on_bytes = function()
+					if inactivity_timer then
+						inactivity_timer:stop()
+						inactivity_timer:start(opts.interactive_timeout * 1000, 0, vim.schedule_wrap(function()
+							if vim.api.nvim_win_is_valid(winnr) then
+								vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
+								vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
+									"",
+									"@info@Process seems inactive - closing window",
+								})
+								vim.defer_fn(function()
+									if vim.api.nvim_win_is_valid(winnr) then
+										vim.api.nvim_win_close(winnr, true)
+									end
+								end, 3000)
+							end
+							if inactivity_timer then
+								inactivity_timer:stop()
+								inactivity_timer:close()
+							end
+						end))
+					end
+				end,
 				on_detach = function()
 					if vim.api.nvim_win_is_valid(winnr) then
 						vim.api.nvim_set_current_win(winnr)
 					end
-				end,
+					if inactivity_timer then
+						inactivity_timer:stop()
+						inactivity_timer:close()
+					end
+				end
 			})
 		else
 			-- 通常モードの場合は自動クローズを有効化

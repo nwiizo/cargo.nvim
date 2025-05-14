@@ -68,6 +68,7 @@ impl CargoCommands {
         args: &[&str],
         timeout_duration: Option<Duration>,
     ) -> LuaResult<(String, bool)> {
+        // コマンド設定
         let mut cmd = TokioCommand::new("cargo");
         cmd.arg(command)
             .args(args)
@@ -75,6 +76,19 @@ impl CargoCommands {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
+        // タイムアウト設定 - コマンドに応じて適切な値を設定
+        let command_timeout = if timeout_duration.is_some() {
+            timeout_duration
+        } else {
+            match command {
+                "run" => Some(Duration::from_secs(60)), // 1分（必要に応じて調整）
+                "test" => Some(Duration::from_secs(60)),
+                "bench" => Some(Duration::from_secs(120)),
+                _ => Some(Duration::from_secs(30)), // すべてのコマンドにデフォルトタイムアウト
+            }
+        };
+
+        // プロセス起動
         let mut child = cmd.spawn().map_err(|e| {
             LuaError::RuntimeError(format!("Failed to execute cargo {}: {}", command, e))
         })?;
@@ -82,113 +96,152 @@ impl CargoCommands {
         let stdout = child.stdout.take().unwrap();
         let stderr = child.stderr.take().unwrap();
         let stdin = child.stdin.take().unwrap();
-        let mut reader = BufReader::new(stdout);
-        let mut stderr_reader = BufReader::new(stderr);
-        let mut output = String::new();
-        let mut line = String::new();
+
+        // 出力バッファ
+        let output = String::new();
         let mut is_interactive = false;
 
-        // 標準入力用のチャネルを作成
+        // 入力チャネル作成（インタラクティブモード用）
         let (tx, mut rx) = mpsc::channel::<String>(32);
-        set_input_sender(tx);
+        set_input_sender(tx.clone());
 
-        // 標準入力を処理するタスク
+        // 1. 標準入力を処理するタスク
         let stdin_task = tokio::spawn(async move {
             let mut stdin = stdin;
             while let Some(input) = rx.recv().await {
-                if let Err(e) = stdin.write_all(input.as_bytes()).await {
-                    eprintln!("Failed to write to stdin: {}", e);
+                if let Err(_) = stdin.write_all(input.as_bytes()).await {
                     break;
                 }
-                if let Err(e) = stdin.flush().await {
-                    eprintln!("Failed to flush stdin: {}", e);
+                if let Err(_) = stdin.flush().await {
                     break;
                 }
             }
         });
 
-        // インタラクティブモードの検出
-        while let Ok(n) = reader.read_line(&mut line).await {
-            if n == 0 {
-                break;
-            }
+        // 2. 標準出力を読み取るタスク
+        let stdout_reader = BufReader::new(stdout);
+        let mut stdout_lines = stdout_reader.lines();
 
-            // インタラクティブモードの検出パターン
-            if line.contains("? [Y/n]")
-                || line.contains("Enter password:")
-                || line.contains("> ")
-                || line.contains("[1/3]")
-                || line.ends_with("? ")
-            {
-                is_interactive = true;
-            }
+        // 3. 標準エラーを読み取るタスク
+        let stderr_reader = BufReader::new(stderr);
+        let mut stderr_lines = stderr_reader.lines();
 
-            output.push_str(&line);
-            line.clear();
-        }
+        // 4. 監視タスク（タイムアウトと出力収集）
+        // コマンド文字列をクローン
+        let command_str = command.to_string();
+        let process_monitor = tokio::spawn(async move {
+            let mut combined_output = String::new();
+            let mut check_interactive = true;
 
-        // Capture stderr as well
-        let mut stderr_line = String::new();
-        while let Ok(n) = stderr_reader.read_line(&mut stderr_line).await {
-            if n == 0 {
-                break;
-            }
-            output.push_str(&stderr_line);
-            stderr_line.clear();
-        }
+            // タイムアウト用タイマー
+            let timeout_time =
+                std::time::Instant::now() + command_timeout.unwrap_or(Duration::from_secs(60));
 
-        // run コマンドは常にインタラクティブとして扱う
-        if command == "run" {
-            is_interactive = true;
-        }
+            loop {
+                // 1. 標準出力からの読み取りを試行
+                let stdout_fut = stdout_lines.next_line();
+                // 2. 標準エラーからの読み取りを試行
+                let stderr_fut = stderr_lines.next_line();
+                // 3. 短いタイムアウトで待機
+                let timeout_fut = tokio::time::sleep(Duration::from_millis(100));
 
-        // タイムアウト処理
-        if let Some(duration) = timeout_duration {
-            match timeout(duration, child.wait()).await {
-                Ok(status) => {
-                    if !status
-                        .map_err(|e| LuaError::RuntimeError(format!("Process error: {}", e)))?
-                        .success()
-                        && !is_interactive
-                    {
-                        stdin_task.abort();
-                        return Err(LuaError::RuntimeError(format!(
-                            "cargo {} failed: {}",
-                            command, output
-                        )));
+                tokio::select! {
+                    result = stdout_fut => {
+                        match result {
+                            Ok(Some(line)) => {
+                                // インタラクティブモード検出（最初の数行のみチェック）
+                                if check_interactive && (
+                                    line.contains("? [Y/n]") ||
+                                    line.contains("Enter password:") ||
+                                    line.contains("> ") ||
+                                    line.contains("[1/3]") ||
+                                    line.ends_with("? ") ||
+                                    command_str == "run" && line.trim().is_empty() // runコマンドで空行があればインタラクティブの可能性
+                                ) {
+                                    is_interactive = true;
+                                }
+
+                                combined_output.push_str(&line);
+                                combined_output.push('\n');
+                            },
+                            Ok(None) => break, // EOF
+                            Err(_) => break, // エラー発生
+                        }
+                    },
+                    result = stderr_fut => {
+                        match result {
+                            Ok(Some(line)) => {
+                                combined_output.push_str(&line);
+                                combined_output.push('\n');
+                            },
+                            Ok(None) => {}, // EOF、標準出力がまだある可能性があるので続行
+                            Err(_) => {}, // エラー発生、標準出力がまだある可能性があるので続行
+                        }
+                    },
+                    _ = timeout_fut => {
+                        // 一定時間経過すると、インタラクティブチェックを無効化
+                        if check_interactive && combined_output.len() > 100 {
+                            check_interactive = false;
+                        }
+
+                        // 全体のタイムアウトチェック
+                        if std::time::Instant::now() > timeout_time && !is_interactive {
+                            return (combined_output, is_interactive, true); // タイムアウト
+                        }
                     }
                 }
-                Err(_) => {
-                    stdin_task.abort();
+            }
+
+            (combined_output, is_interactive, false) // 通常終了
+        });
+
+        // 5. プロセス終了を待機
+        let status_result = match command_timeout {
+            Some(duration) => timeout(duration, child.wait()).await,
+            None => Ok(child.wait().await),
+        };
+
+        // 監視タスクからの結果を取得（最大1秒待機）
+        let monitor_result = timeout(Duration::from_secs(1), process_monitor).await;
+
+        // リソースクリーンアップ
+        stdin_task.abort();
+        drop(tx);
+
+        // 結果の処理
+        let (final_output, is_interactive_mode, timed_out) = match monitor_result {
+            Ok(Ok((out, interactive, timeout))) => (out, interactive, timeout),
+            _ => (output, is_interactive, false), // デフォルト値を使用
+        };
+
+        // プロセスのステータスチェック
+        match status_result {
+            Ok(Ok(status)) => {
+                if !status.success() && !is_interactive_mode {
                     return Err(LuaError::RuntimeError(format!(
-                        "cargo {} timed out after {} seconds",
-                        command,
-                        duration.as_secs()
+                        "cargo {} failed: {}",
+                        command, final_output
                     )));
                 }
             }
-        } else {
-            let status = child.wait().await.map_err(|e| {
-                LuaError::RuntimeError(format!("Failed to wait for process: {}", e))
-            })?;
-
-            if !status.success() && !is_interactive {
-                stdin_task.abort();
-                return Err(LuaError::RuntimeError(format!(
-                    "cargo {} failed: {}",
-                    command, output
-                )));
+            Err(_) | Ok(Err(_)) => {
+                if !is_interactive_mode || timed_out {
+                    return Err(LuaError::RuntimeError(format!(
+                        "cargo {} timed out or failed to execute",
+                        command
+                    )));
+                }
             }
         }
 
-        // 一時的なパッチ: cargo checkは常に成功を返す
-        if command == "check" && output.trim().is_empty() {
-            output =
-                "Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.00s".to_string();
+        // runコマンドの場合、特別な処理
+        if command == "run" {
+            // run の場合は短い出力だとインタラクティブではない可能性が高い
+            let is_likely_interactive = final_output.len() < 500 || is_interactive_mode;
+            return Ok((final_output, is_likely_interactive));
         }
 
-        stdin_task.abort();
-        Ok((output, is_interactive))
+        Ok((final_output, is_interactive_mode))
     }
 
     /// Check the project for errors
@@ -238,13 +291,13 @@ impl CargoCommands {
 
     /// Run the project
     pub async fn cargo_run(&self, args: &[&str]) -> LuaResult<(String, bool)> {
-        // proconio などの入力待ちプログラムはインタラクティブモードとして扱う
-        self.execute_cargo_command_internal("run", args, None)
-            .await
-            .map(|(output, _)| {
-                // 入力待ちの可能性が高いプログラムは常にインタラクティブとして扱う
-                (output, true)
-            })
+        // 特定の出力パターンを持つプログラムのみインタラクティブモードとして扱う
+        let result = self
+            .execute_cargo_command_internal("run", args, Some(Duration::from_secs(60)))
+            .await?;
+
+        // 結果を直接返す（スマート検出ロジックは内部関数に移動）
+        Ok(result)
     }
 
     /// Run the tests

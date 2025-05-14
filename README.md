@@ -117,10 +117,16 @@ require("cargo").setup({
   window_width = 0.8,           -- Window width (80% of editor width)
   window_height = 0.8,          -- Window height (80% of editor height)
   border = "rounded",           -- Border style ("none", "single", "double", "rounded")
+  wrap_output = true,           -- Enable text wrapping in output window
   
   -- Auto-close settings
   auto_close = true,            -- Auto close window on success
   close_timeout = 5000,         -- Close window after 5000ms
+  
+  -- Timeout settings
+  run_timeout = 60,             -- Timeout for cargo run in seconds
+  interactive_timeout = 30,     -- Inactivity timeout for interactive mode
+  force_smart_detection = true, -- Always use smart detection for interactive programs
   
   -- Command settings 
   commands = {
@@ -141,6 +147,15 @@ require("cargo").setup({
 In the floating window:
 - `q` or `<Esc>` - Close the window
 - `<C-c>` - Cancel the running command and close the window
+- `w` - Toggle text wrapping (useful for long error messages)
+
+## 🔄 Interactive Mode
+
+For interactive programs (e.g., those requiring user input):
+- An input field appears at the bottom of the window
+- Enter your input and press Enter to send it to the program
+- The window automatically closes after 30 seconds of inactivity (configurable)
+- The timeout prevents hanging processes and memory leaks
 
 ## 👥 Contributing
 
