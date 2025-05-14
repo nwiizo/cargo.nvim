@@ -68,7 +68,6 @@ impl CargoCommands {
         args: &[&str],
         timeout_duration: Option<Duration>,
     ) -> LuaResult<(String, bool)> {
-        // コマンド設定
         let mut cmd = TokioCommand::new("cargo");
         cmd.arg(command)
             .args(args)
@@ -76,19 +75,16 @@ impl CargoCommands {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        // タイムアウト設定 - コマンドに応じて適切な値を設定
-        let command_timeout = if timeout_duration.is_some() {
-            timeout_duration
-        } else {
+        // Always set a timeout (with default values)
+        let command_timeout = timeout_duration.unwrap_or_else(|| {
             match command {
-                "run" => Some(Duration::from_secs(60)), // 1分（必要に応じて調整）
-                "test" => Some(Duration::from_secs(60)),
-                "bench" => Some(Duration::from_secs(120)),
-                _ => Some(Duration::from_secs(30)), // すべてのコマンドにデフォルトタイムアウト
+                "run" => Duration::from_secs(300),  // 5 minutes
+                "test" => Duration::from_secs(300), // 5 minutes
+                "bench" => Duration::from_secs(600), // 10 minutes
+                _ => Duration::from_secs(120),      // 2 minutes
             }
-        };
+        });
 
-        // プロセス起動
         let mut child = cmd.spawn().map_err(|e| {
             LuaError::RuntimeError(format!("Failed to execute cargo {}: {}", command, e))
         })?;
@@ -97,148 +93,160 @@ impl CargoCommands {
         let stderr = child.stderr.take().unwrap();
         let stdin = child.stdin.take().unwrap();
 
-        // 出力バッファ
-        let output = String::new();
+        // Create buffered streams
+        let mut stdout_reader = BufReader::new(stdout).lines();
+        let mut stderr_reader = BufReader::new(stderr).lines();
+        
+        // Interactive mode detection flag
         let mut is_interactive = false;
-
-        // 入力チャネル作成（インタラクティブモード用）
+        
+        // Assume interactive mode based on command name
+        if command == "run" {
+            // Treat run command as interactive by default
+            is_interactive = true;
+        }
+        
+        // Output buffer
+        let mut output = String::new();
+        
+        // Channel for standard input
         let (tx, mut rx) = mpsc::channel::<String>(32);
         set_input_sender(tx.clone());
 
-        // 1. 標準入力を処理するタスク
-        let stdin_task = tokio::spawn(async move {
+        // Task to handle standard input
+        let stdin_handle = tokio::spawn(async move {
             let mut stdin = stdin;
             while let Some(input) = rx.recv().await {
-                if let Err(_) = stdin.write_all(input.as_bytes()).await {
-                    break;
-                }
-                if let Err(_) = stdin.flush().await {
-                    break;
+                match stdin.write_all(input.as_bytes()).await {
+                    Ok(_) => {
+                        if let Err(e) = stdin.flush().await {
+                            eprintln!("Failed to flush stdin: {}", e);
+                            break;
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("Failed to write to stdin: {}", e);
+                        break;
+                    }
                 }
             }
         });
 
-        // 2. 標準出力を読み取るタスク
-        let stdout_reader = BufReader::new(stdout);
-        let mut stdout_lines = stdout_reader.lines();
-
-        // 3. 標準エラーを読み取るタスク
-        let stderr_reader = BufReader::new(stderr);
-        let mut stderr_lines = stderr_reader.lines();
-
-        // 4. 監視タスク（タイムアウトと出力収集）
-        // コマンド文字列をクローン
-        let command_str = command.to_string();
-        let process_monitor = tokio::spawn(async move {
+        // Asynchronous IO processing and timeout control
+        let output_handle = tokio::spawn(async move {
             let mut combined_output = String::new();
-            let mut check_interactive = true;
-
-            // タイムアウト用タイマー
-            let timeout_time =
-                std::time::Instant::now() + command_timeout.unwrap_or(Duration::from_secs(60));
-
+            let start_time = std::time::Instant::now();
+            
+            // Output reading loop
             loop {
-                // 1. 標準出力からの読み取りを試行
-                let stdout_fut = stdout_lines.next_line();
-                // 2. 標準エラーからの読み取りを試行
-                let stderr_fut = stderr_lines.next_line();
-                // 3. 短いタイムアウトで待機
-                let timeout_fut = tokio::time::sleep(Duration::from_millis(100));
-
+                let timeout_remaining = command_timeout.checked_sub(start_time.elapsed())
+                                        .unwrap_or_else(|| Duration::from_secs(1));
+                
+                // Monitor both stdout and stderr simultaneously
                 tokio::select! {
-                    result = stdout_fut => {
-                        match result {
+                    // Reading standard output
+                    stdout_result = stdout_reader.next_line() => {
+                        match stdout_result {
                             Ok(Some(line)) => {
-                                // インタラクティブモード検出（最初の数行のみチェック）
-                                if check_interactive && (
-                                    line.contains("? [Y/n]") ||
-                                    line.contains("Enter password:") ||
-                                    line.contains("> ") ||
-                                    line.contains("[1/3]") ||
+                                // Detect interactive mode based on specific patterns
+                                if !is_interactive && (
+                                    line.contains("? [Y/n]") || 
+                                    line.contains("Enter password:") || 
+                                    line.contains("> ") || 
+                                    line.contains("[1/3]") || 
                                     line.ends_with("? ") ||
-                                    command_str == "run" && line.trim().is_empty() // runコマンドで空行があればインタラクティブの可能性
+                                    line.trim().is_empty() // Empty line may indicate interactive mode
                                 ) {
                                     is_interactive = true;
                                 }
-
+                                
                                 combined_output.push_str(&line);
                                 combined_output.push('\n');
                             },
                             Ok(None) => break, // EOF
-                            Err(_) => break, // エラー発生
+                            Err(_) => break,
                         }
                     },
-                    result = stderr_fut => {
-                        match result {
+                    
+                    // Reading standard error
+                    stderr_result = stderr_reader.next_line() => {
+                        match stderr_result {
                             Ok(Some(line)) => {
                                 combined_output.push_str(&line);
                                 combined_output.push('\n');
                             },
-                            Ok(None) => {}, // EOF、標準出力がまだある可能性があるので続行
-                            Err(_) => {}, // エラー発生、標準出力がまだある可能性があるので続行
+                            Ok(None) => {}, // Stdout might still have data
+                            Err(_) => {},
                         }
                     },
-                    _ = timeout_fut => {
-                        // 一定時間経過すると、インタラクティブチェックを無効化
-                        if check_interactive && combined_output.len() > 100 {
-                            check_interactive = false;
-                        }
-
-                        // 全体のタイムアウトチェック
-                        if std::time::Instant::now() > timeout_time && !is_interactive {
-                            return (combined_output, is_interactive, true); // タイムアウト
-                        }
+                    
+                    // Timeout processing (only for non-interactive mode)
+                    _ = tokio::time::sleep(timeout_remaining), if !is_interactive => {
+                        return (combined_output, is_interactive, true); // Timeout
                     }
                 }
+                
+                // Check timeout (even for interactive mode)
+                if start_time.elapsed() >= command_timeout {
+                    return (combined_output, is_interactive, true);
+                }
+                
+                // For interactive mode, use an extended timeout (3x normal timeout)
+                // but still terminate after excessive inactivity
+                if is_interactive && start_time.elapsed() >= Duration::from_secs(command_timeout.as_secs() * 3) {
+                    return (combined_output, is_interactive, true);
+                }
             }
-
-            (combined_output, is_interactive, false) // 通常終了
+            
+            (combined_output, is_interactive, false)
         });
 
-        // 5. プロセス終了を待機
-        let status_result = match command_timeout {
-            Some(duration) => timeout(duration, child.wait()).await,
-            None => Ok(child.wait().await),
+        // Wait for process completion
+        let process_status = tokio::select! {
+            status = child.wait() => {
+                match status {
+                    Ok(s) => (s.success(), false), // (succeeded, timed out)
+                    Err(_) => (false, false),
+                }
+            },
+            _ = tokio::time::sleep(command_timeout) => {
+                // Timeout occurred
+                child.kill().await.ok(); // Force terminate the process
+                (false, true)
+            }
         };
 
-        // 監視タスクからの結果を取得（最大1秒待機）
-        let monitor_result = timeout(Duration::from_secs(1), process_monitor).await;
+        // Get results from output processing task
+        let output_result = match tokio::time::timeout(Duration::from_secs(5), output_handle).await {
+            Ok(Ok((out, interactive, _))) => (out, interactive),
+            _ => (output, is_interactive),
+        };
 
-        // リソースクリーンアップ
-        stdin_task.abort();
+        // Resource cleanup
+        stdin_handle.abort();
         drop(tx);
+        // rx is already moved into the stdin_handle task
+        // and will be dropped when the task is aborted
 
-        // 結果の処理
-        let (final_output, is_interactive_mode, timed_out) = match monitor_result {
-            Ok(Ok((out, interactive, timeout))) => (out, interactive, timeout),
-            _ => (output, is_interactive, false), // デフォルト値を使用
-        };
+        // Process the results
+        let (process_success, process_timeout) = process_status;
+        let (final_output, is_interactive_mode) = output_result;
 
-        // プロセスのステータスチェック
-        match status_result {
-            Ok(Ok(status)) => {
-                if !status.success() && !is_interactive_mode {
-                    return Err(LuaError::RuntimeError(format!(
-                        "cargo {} failed: {}",
-                        command, final_output
-                    )));
-                }
-            }
-            Err(_) | Ok(Err(_)) => {
-                if !is_interactive_mode || timed_out {
-                    return Err(LuaError::RuntimeError(format!(
-                        "cargo {} timed out or failed to execute",
-                        command
-                    )));
-                }
-            }
+        // Check if process timed out
+        if process_timeout && !is_interactive_mode {
+            return Err(LuaError::RuntimeError(format!(
+                "cargo {} timed out after {} seconds",
+                command,
+                command_timeout.as_secs()
+            )));
         }
 
-        // runコマンドの場合、特別な処理
-        if command == "run" {
-            // run の場合は短い出力だとインタラクティブではない可能性が高い
-            let is_likely_interactive = final_output.len() < 500 || is_interactive_mode;
-            return Ok((final_output, is_likely_interactive));
+        // Check if process failed
+        if !process_success && !is_interactive_mode {
+            return Err(LuaError::RuntimeError(format!(
+                "cargo {} failed: {}",
+                command, final_output
+            )));
         }
 
         Ok((final_output, is_interactive_mode))
@@ -291,12 +299,20 @@ impl CargoCommands {
 
     /// Run the project
     pub async fn cargo_run(&self, args: &[&str]) -> LuaResult<(String, bool)> {
-        // 特定の出力パターンを持つプログラムのみインタラクティブモードとして扱う
-        let result = self
-            .execute_cargo_command_internal("run", args, Some(Duration::from_secs(60)))
-            .await?;
-
-        // 結果を直接返す（スマート検出ロジックは内部関数に移動）
+        // Designed to support interactive programs
+        let result = self.execute_cargo_command_internal("run", args, None).await?;
+        
+        // Check if proconio is likely being used by examining Cargo.toml
+        // This is important for competitive programming scenarios where proconio::input! is common
+        let has_proconio = std::fs::read_to_string("Cargo.toml")
+            .map(|content| content.contains("proconio"))
+            .unwrap_or(false);
+        
+        // If proconio is used, force interactive mode
+        if has_proconio {
+            return Ok((result.0, true));
+        }
+        
         Ok(result)
     }
 

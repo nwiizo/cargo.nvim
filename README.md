@@ -178,3 +178,101 @@ This plugin is inspired by various Neovim plugins and the Rust community.
 ## 🎉 Related Projects
 
 - [cargo-autodd](https://github.com/nwiizo/cargo-autodd)
+
+-- CargoRunTerm command - Run cargo run in terminal mode
+vim.api.nvim_create_user_command("CargoRunTerm", function(args)
+    -- Save all modified buffers before executing command
+    vim.cmd("wa")
+    
+    -- Set window size
+    local width = math.floor(vim.o.columns * 0.8)
+    local height = math.floor(vim.o.lines * 0.8)
+    
+    -- Create terminal buffer
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    
+    -- Create floating window
+    local winnr = vim.api.nvim_open_win(bufnr, true, {
+        relative = "editor",
+        width = width,
+        height = height,
+        col = math.floor((vim.o.columns - width) / 2),
+        row = math.floor((vim.o.lines - height) / 2),
+        style = "minimal",
+        border = "rounded",
+        title = " Cargo Run Terminal ",
+        title_pos = "center",
+    })
+    
+    -- Set window options
+    vim.api.nvim_win_set_option(winnr, "number", true)
+    vim.api.nvim_win_set_option(winnr, "wrap", true)
+    vim.api.nvim_win_set_option(winnr, "cursorline", true)
+    
+    -- Build command line
+    local cmd = "cargo run"
+    if args.args and args.args ~= "" then
+        cmd = cmd .. " " .. args.args
+    end
+    
+    -- Start terminal
+    vim.fn.termopen(cmd, {
+        on_exit = function(_, _, _)
+            -- Display message when terminal exits
+            vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
+                "",
+                "=== Process completed ===",
+                "Press q or <Esc> to close this window"
+            })
+            
+            -- Exit insert mode
+            vim.cmd("stopinsert")
+            
+            -- Set keymappings for closing the window
+            vim.api.nvim_buf_set_keymap(bufnr, "n", "q", ":q<CR>", {noremap = true, silent = true})
+            vim.api.nvim_buf_set_keymap(bufnr, "n", "<Esc>", ":q<CR>", {noremap = true, silent = true})
+        end
+    })
+    
+    -- Keymapping for closing (when running)
+    vim.api.nvim_buf_set_keymap(bufnr, "t", "<C-\\><C-n>", "", {
+        callback = function()
+            -- Switch to normal mode
+            vim.cmd("stopinsert")
+            -- Confirmation message for closing
+            if vim.fn.confirm("Close terminal?", "&Yes\n&No", 2) == 1 then
+                vim.api.nvim_win_close(winnr, true)
+            else
+                -- Return to terminal mode if canceled
+                vim.cmd("startinsert")
+            end
+        end,
+        noremap = true,
+        silent = true
+    })
+    
+    -- Exit mapping (Ctrl+C, Ctrl+D)
+    vim.api.nvim_buf_set_keymap(bufnr, "t", "<C-c>", "<C-c>", {noremap = true})
+    vim.api.nvim_buf_set_keymap(bufnr, "t", "<C-d>", "<C-d>", {noremap = true})
+    
+    -- Start terminal mode (enable input)
+    vim.cmd("startinsert")
+end, {
+    nargs = "*",
+    desc = "Run cargo in interactive terminal mode (for proconio etc.)",
+    complete = function(ArgLead, CmdLine, CursorPos)
+        -- Provide argument completion
+        local completions = {
+            "--release", "--bin", "--example", "--package", "--target"
+        }
+        
+        local matches = {}
+        for _, comp in ipairs(completions) do
+            if comp:find(ArgLead, 1, true) == 1 then
+                table.insert(matches, comp)
+            end
+        end
+        
+        return matches
+    end
+})
