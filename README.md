@@ -17,11 +17,13 @@
 - ⚡ Asynchronous command execution
 - 🔄 Auto-closing windows on command completion
 - ⌨️ Easy keyboard shortcuts for window management
+- 📟 Terminal mode for interactive applications
 
-## contents
+## 📑 Table of Contents
 
 - [🚀 cargo.nvim](#-cargonvim)
   - [✨ Features](#-features)
+  - [📑 Table of Contents](#-table-of-contents)
   - [📥 Installation](#-installation)
     - [Using lazy.nvim](#using-lazynvim)
     - [Using packer.nvim](#using-packernvim)
@@ -29,9 +31,12 @@
   - [🛠️ Available Commands](#️-available-commands)
   - [⚙️ Configuration](#️-configuration)
   - [⌨️ Key Mappings](#️-key-mappings)
+  - [🔄 Interactive Mode](#-interactive-mode)
+  - [📟 Terminal Mode](#-terminal-mode)
   - [👥 Contributing](#-contributing)
   - [📜 License](#-license)
   - [💝 Acknowledgements](#-acknowledgements)
+  - [🎉 Related Projects](#-related-projects)
 
 ## 📥 Installation
 
@@ -59,8 +64,15 @@
     "CargoDoc",
     "CargoNew",
     "CargoRun",
+    "CargoRunTerm",
     "CargoTest",
-    "CargoUpdate"
+    "CargoUpdate",
+    "CargoCheck",
+    "CargoClippy",
+    "CargoAdd",
+    "CargoRemove",
+    "CargoFmt",
+    "CargoFix"
   }
 }
 ```
@@ -90,20 +102,39 @@ use {
 - 🦀 Rust and Cargo installed on your system
 - 📚 Additional dependencies:
   - **Ubuntu/Debian:** `libluajit-5.1-dev` (Install with `sudo apt install libluajit-5.1-dev`)
+  - **macOS:** `luajit` (Install with `brew install luajit`)
   - For other Linux distributions, you may need to install an equivalent LuaJIT development package
 
 If you encounter build errors mentioning `lluajit-5.1` during installation, you likely need to install the LuaJIT development package for your system.
 
 ## 🛠️ Available Commands
 
+### Core Commands
 - 📊 `:CargoBench` - Run benchmarks
 - 🏗️ `:CargoBuild` - Build the project
 - 🧹 `:CargoClean` - Remove generated artifacts 
 - 📚 `:CargoDoc` - Generate project documentation
 - ✨ `:CargoNew` - Create a new Cargo project
-- ▶️  `:CargoRun` - Run the project
+- ▶️  `:CargoRun` - Run the project in a floating window
+- 📟 `:CargoRunTerm` - Run the project in terminal mode (better for interactive applications)
 - 🧪 `:CargoTest` - Run tests
 - 🔄 `:CargoUpdate` - Update dependencies
+
+### Additional Commands
+- 🔍 `:CargoCheck` - Check the project for errors
+- 📋 `:CargoClippy` - Run the Clippy linter
+- ➕ `:CargoAdd` - Add dependency
+- ➖ `:CargoRemove` - Remove dependency
+- 🎨 `:CargoFmt` - Format code with rustfmt
+- 🔧 `:CargoFix` - Auto-fix warnings
+- 📦 `:CargoPublish` - Publish package
+- 📥 `:CargoInstall` - Install binary
+- 📤 `:CargoUninstall` - Uninstall binary
+- 🔎 `:CargoSearch` - Search packages
+- 🌲 `:CargoTree` - Show dependency tree
+- 📦 `:CargoVendor` - Vendor dependencies
+- 🛡️ `:CargoAudit` - Audit dependencies
+- 📊 `:CargoOutdated` - Check outdated dependencies
 - 🤖 `:CargoAutodd` - Automatically manage dependencies
 
 ## ⚙️ Configuration
@@ -118,27 +149,35 @@ require("cargo").setup({
   window_height = 0.8,          -- Window height (80% of editor height)
   border = "rounded",           -- Border style ("none", "single", "double", "rounded")
   wrap_output = true,           -- Enable text wrapping in output window
+  show_line_numbers = true,     -- Show line numbers in output window
+  show_cursor_line = true,      -- Highlight current line in output window
   
   -- Auto-close settings
   auto_close = true,            -- Auto close window on success
   close_timeout = 5000,         -- Close window after 5000ms
   
   -- Timeout settings
-  run_timeout = 60,             -- Timeout for cargo run in seconds
+  run_timeout = 300,            -- Timeout for cargo run in seconds
   interactive_timeout = 30,     -- Inactivity timeout for interactive mode
+  
+  -- Advanced behavior options
+  force_interactive_run = true, -- Always treat cargo run as interactive mode
+  max_inactivity_warnings = 3,  -- Maximum number of inactivity warnings before termination
+  detect_proconio = true,       -- Enable detection of proconio usage
   force_smart_detection = true, -- Always use smart detection for interactive programs
   
-  -- Command settings 
-  commands = {
-    bench = { nargs = "*" },    -- Command arguments configuration
-    build = { nargs = "*" },
-    clean = { nargs = "*" },
-    doc = { nargs = "*" },
-    new = { nargs = 1 },
-    run = { nargs = "*" },
-    test = { nargs = "*" },
-    update = { nargs = "*" },
-  }
+  -- Key mappings (customizable)
+  keymaps = {
+    close = "q",
+    scroll_up = "<C-u>",
+    scroll_down = "<C-d>",
+    scroll_top = "gg",
+    scroll_bottom = "G",
+    interrupt = "<C-c>",
+    toggle_wrap = "w",
+    copy_output = "y",
+    clear_output = "c",
+  },
 })
 ```
 
@@ -146,16 +185,40 @@ require("cargo").setup({
 
 In the floating window:
 - `q` or `<Esc>` - Close the window
-- `<C-c>` - Cancel the running command and close the window
-- `w` - Toggle text wrapping (useful for long error messages)
+- `<C-c>` - Cancel the running command
+- `<C-u>` - Scroll up
+- `<C-d>` - Scroll down
+- `gg` - Scroll to top
+- `G` - Scroll to bottom
+- `w` - Toggle text wrapping
+- `y` - Copy all output to clipboard
+- `c` - Clear output
 
 ## 🔄 Interactive Mode
 
-For interactive programs (e.g., those requiring user input):
-- An input field appears at the bottom of the window
+For interactive programs that require user input:
+- An input field appears at the bottom of the window when needed
 - Enter your input and press Enter to send it to the program
-- The window automatically closes after 30 seconds of inactivity (configurable)
-- The timeout prevents hanging processes and memory leaks
+- The plugin automatically detects when a program is waiting for input
+- The window automatically closes after a period of inactivity (configurable)
+- Interactive mode timeout prevents hanging processes and memory leaks
+
+## 📟 Terminal Mode
+
+For highly interactive applications (e.g., using proconio or TUI applications):
+- Use `:CargoRunTerm` to run your application in a terminal emulator inside a floating window
+- Supports full terminal capabilities for interactive Rust applications
+- Useful for:
+  - Competitive programming with libraries like proconio
+  - Text-based UI applications
+  - Programs requiring advanced terminal input/output
+- Provides a better experience than the standard `:CargoRun` for interactive applications
+
+### Terminal Mode Key Mappings
+- `q` or `<Esc>` - Close the window (after program completion)
+- `<C-\><C-n>` - Switch to normal mode (while running)
+- `<C-c>` - Send interrupt signal
+- `<C-d>` - Send EOF signal
 
 ## 👥 Contributing
 
@@ -177,102 +240,4 @@ This plugin is inspired by various Neovim plugins and the Rust community.
 
 ## 🎉 Related Projects
 
-- [cargo-autodd](https://github.com/nwiizo/cargo-autodd)
-
--- CargoRunTerm command - Run cargo run in terminal mode
-vim.api.nvim_create_user_command("CargoRunTerm", function(args)
-    -- Save all modified buffers before executing command
-    vim.cmd("wa")
-    
-    -- Set window size
-    local width = math.floor(vim.o.columns * 0.8)
-    local height = math.floor(vim.o.lines * 0.8)
-    
-    -- Create terminal buffer
-    local bufnr = vim.api.nvim_create_buf(false, true)
-    
-    -- Create floating window
-    local winnr = vim.api.nvim_open_win(bufnr, true, {
-        relative = "editor",
-        width = width,
-        height = height,
-        col = math.floor((vim.o.columns - width) / 2),
-        row = math.floor((vim.o.lines - height) / 2),
-        style = "minimal",
-        border = "rounded",
-        title = " Cargo Run Terminal ",
-        title_pos = "center",
-    })
-    
-    -- Set window options
-    vim.api.nvim_win_set_option(winnr, "number", true)
-    vim.api.nvim_win_set_option(winnr, "wrap", true)
-    vim.api.nvim_win_set_option(winnr, "cursorline", true)
-    
-    -- Build command line
-    local cmd = "cargo run"
-    if args.args and args.args ~= "" then
-        cmd = cmd .. " " .. args.args
-    end
-    
-    -- Start terminal
-    vim.fn.termopen(cmd, {
-        on_exit = function(_, _, _)
-            -- Display message when terminal exits
-            vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
-                "",
-                "=== Process completed ===",
-                "Press q or <Esc> to close this window"
-            })
-            
-            -- Exit insert mode
-            vim.cmd("stopinsert")
-            
-            -- Set keymappings for closing the window
-            vim.api.nvim_buf_set_keymap(bufnr, "n", "q", ":q<CR>", {noremap = true, silent = true})
-            vim.api.nvim_buf_set_keymap(bufnr, "n", "<Esc>", ":q<CR>", {noremap = true, silent = true})
-        end
-    })
-    
-    -- Keymapping for closing (when running)
-    vim.api.nvim_buf_set_keymap(bufnr, "t", "<C-\\><C-n>", "", {
-        callback = function()
-            -- Switch to normal mode
-            vim.cmd("stopinsert")
-            -- Confirmation message for closing
-            if vim.fn.confirm("Close terminal?", "&Yes\n&No", 2) == 1 then
-                vim.api.nvim_win_close(winnr, true)
-            else
-                -- Return to terminal mode if canceled
-                vim.cmd("startinsert")
-            end
-        end,
-        noremap = true,
-        silent = true
-    })
-    
-    -- Exit mapping (Ctrl+C, Ctrl+D)
-    vim.api.nvim_buf_set_keymap(bufnr, "t", "<C-c>", "<C-c>", {noremap = true})
-    vim.api.nvim_buf_set_keymap(bufnr, "t", "<C-d>", "<C-d>", {noremap = true})
-    
-    -- Start terminal mode (enable input)
-    vim.cmd("startinsert")
-end, {
-    nargs = "*",
-    desc = "Run cargo in interactive terminal mode (for proconio etc.)",
-    complete = function(ArgLead, CmdLine, CursorPos)
-        -- Provide argument completion
-        local completions = {
-            "--release", "--bin", "--example", "--package", "--target"
-        }
-        
-        local matches = {}
-        for _, comp in ipairs(completions) do
-            if comp:find(ArgLead, 1, true) == 1 then
-                table.insert(matches, comp)
-            end
-        end
-        
-        return matches
-    end
-})
+- [cargo-autodd](https://github.com/nwiizo/cargo-autodd) - A tool for automatic dependency management
