@@ -12,7 +12,7 @@
 ## ✨ Features
 
 - 🔧 Execute Cargo commands directly from Neovim
-- 🪟 Real-time output in floating windows
+- 🪟 Real-time output in floating windows or split windows
 - 🎨 Syntax highlighting for Cargo output
 - ⚡ Asynchronous command execution
 - 🔄 Auto-closing windows on command completion
@@ -30,6 +30,7 @@
   - [📋 Requirements](#-requirements)
   - [🛠️ Available Commands](#️-available-commands)
   - [⚙️ Configuration](#️-configuration)
+  - [📐 Split Window Mode](#-split-window-mode)
   - [⌨️ Key Mappings](#️-key-mappings)
   - [🔄 Interactive Mode](#-interactive-mode)
   - [📟 Terminal Mode](#-terminal-mode)
@@ -144,14 +145,18 @@ You can customize cargo.nvim by passing options to the setup function:
 ```lua
 require("cargo").setup({
   -- Window settings
-  float_window = true,          -- Use floating window
-  window_width = 0.8,           -- Window width (80% of editor width)
-  window_height = 0.8,          -- Window height (80% of editor height)
-  border = "rounded",           -- Border style ("none", "single", "double", "rounded")
+  float_window = true,          -- Use floating window (true) or split window (false)
+  window_width = 0.8,           -- Floating window width (80% of editor width)
+  window_height = 0.8,          -- Floating window height (80% of editor height)
+  border = "rounded",           -- Border style for floating window ("none", "single", "double", "rounded")
   wrap_output = true,           -- Enable text wrapping in output window
   show_line_numbers = true,     -- Show line numbers in output window
   show_cursor_line = true,      -- Highlight current line in output window
-  
+
+  -- Split window settings (when float_window = false)
+  split_direction = "horizontal", -- "horizontal" or "vertical"
+  split_size = 15,              -- Size in lines (horizontal) or columns (vertical), or 0-1 for percentage
+
   -- Auto-close settings
   auto_close = true,            -- Auto close window on success
   close_timeout = 5000,         -- Close window after 5000ms
@@ -181,9 +186,29 @@ require("cargo").setup({
 })
 ```
 
+## 📐 Split Window Mode
+
+You can configure cargo.nvim to display command output in a split window instead of a floating window:
+
+```lua
+require("cargo").setup({
+  float_window = false,           -- Use split window instead of floating
+  split_direction = "horizontal", -- "horizontal" (bottom) or "vertical" (right)
+  split_size = 15,                -- 15 lines for horizontal, or use 0.3 for 30% of screen
+})
+```
+
+**Split Direction Options:**
+- `"horizontal"`: Creates a split at the bottom of the screen
+- `"vertical"`: Creates a split on the right side of the screen
+
+**Split Size Options:**
+- Absolute size: Use an integer (e.g., `15` for 15 lines or columns)
+- Percentage: Use a decimal between 0 and 1 (e.g., `0.3` for 30% of screen height/width)
+
 ## ⌨️ Key Mappings
 
-In the floating window:
+In the output window (both floating and split):
 - `q` or `<Esc>` - Close the window
 - `<C-c>` - Cancel the running command
 - `<C-u>` - Scroll up

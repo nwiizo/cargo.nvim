@@ -23,6 +23,10 @@ local default_opts = {
 	wrap_output = true, -- Enable text wrapping by default
 	show_progress = true,
 
+	-- Split window settings (when float_window = false)
+	split_direction = "horizontal", -- "horizontal" or "vertical"
+	split_size = 15, -- Lines for horizontal, columns for vertical, or 0-1 for percentage
+
 	-- Additional settings
 	run_timeout = 300, -- Timeout for cargo run (seconds)
 	interactive_timeout = 30, -- Inactivity warning for interactive mode (seconds)
@@ -287,6 +291,86 @@ local function create_float_win(opts)
 	return bufnr, winnr
 end
 
+-- Create split window
+local function create_split_win(opts)
+	local bufnr = vim.api.nvim_create_buf(false, true)
+
+	-- Calculate split size
+	local size
+	if type(opts.split_size) == "number" then
+		if opts.split_size > 0 and opts.split_size < 1 then
+			-- Percentage mode
+			if opts.split_direction == "vertical" then
+				size = math.floor(vim.o.columns * opts.split_size)
+			else
+				size = math.floor(vim.o.lines * opts.split_size)
+			end
+		else
+			-- Absolute size
+			size = opts.split_size
+		end
+	else
+		-- Default size
+		size = opts.split_direction == "vertical" and 80 or 15
+	end
+
+	-- Create split window
+	if opts.split_direction == "vertical" then
+		vim.cmd("botright vertical " .. size .. "split")
+	else
+		vim.cmd("botright " .. size .. "split")
+	end
+
+	local winnr = vim.api.nvim_get_current_win()
+	vim.api.nvim_win_set_buf(winnr, bufnr)
+
+	-- Set buffer options
+	vim.api.nvim_buf_set_option(bufnr, "buftype", "nofile")
+	vim.api.nvim_buf_set_option(bufnr, "swapfile", false)
+	vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
+	vim.api.nvim_buf_set_option(bufnr, "filetype", "cargo-output")
+
+	-- Set window options
+	if opts.show_line_numbers then
+		vim.api.nvim_win_set_option(winnr, "number", true)
+	end
+	vim.api.nvim_win_set_option(winnr, "wrap", opts.wrap_output)
+	vim.api.nvim_win_set_option(winnr, "cursorline", opts.show_cursor_line)
+
+	-- Set up key mappings
+	local function set_keymap(mode, key, action)
+		vim.api.nvim_buf_set_keymap(bufnr, mode, key, action, {
+			nowait = true,
+			noremap = true,
+			silent = true,
+		})
+	end
+
+	-- Close window mappings
+	set_keymap("n", opts.keymaps.close, ":q<CR>")
+	set_keymap("n", "<Esc>", ":q<CR>")
+
+	-- Interrupt command mapping
+	set_keymap("n", opts.keymaps.interrupt, '<cmd>lua require("cargo").interrupt()<CR>')
+
+	-- Scroll mappings
+	set_keymap("n", opts.keymaps.scroll_up, "<C-u>")
+	set_keymap("n", opts.keymaps.scroll_down, "<C-d>")
+	set_keymap("n", opts.keymaps.scroll_top, "gg")
+	set_keymap("n", opts.keymaps.scroll_bottom, "G")
+
+	-- Toggle wrap mapping
+	set_keymap("n", opts.keymaps.toggle_wrap, "<cmd>lua vim.wo.wrap = not vim.wo.wrap<CR>")
+
+	-- Copy output mapping
+	set_keymap("n", opts.keymaps.copy_output, "<cmd>%y+<CR>")
+
+	-- Clear output mapping
+	set_keymap("n", opts.keymaps.clear_output, "<cmd>%delete_<CR>")
+
+	return bufnr, winnr
+end
+
 -- Process command output (kept for reference but suppressing warning with _G.process_output)
 _G.process_output = function(output)
 	if type(output) ~= "string" then
@@ -420,16 +504,29 @@ local function execute_command_native(cmd_name, args, opts)
 	-- Save all modified buffers before executing command
 	vim.cmd("wa")
 
-	local bufnr, winnr = create_float_win({
-		title = string.format(" Cargo %s ", cmd_name:upper()),
-		window_width = opts.window_width,
-		window_height = opts.window_height,
-		border = opts.border,
-		show_line_numbers = opts.show_line_numbers,
-		wrap_output = opts.wrap_output,
-		show_cursor_line = opts.show_cursor_line,
-		keymaps = opts.keymaps,
-	})
+	-- Create window based on configuration
+	local bufnr, winnr
+	if opts.float_window then
+		bufnr, winnr = create_float_win({
+			title = string.format(" Cargo %s ", cmd_name:upper()),
+			window_width = opts.window_width,
+			window_height = opts.window_height,
+			border = opts.border,
+			show_line_numbers = opts.show_line_numbers,
+			wrap_output = opts.wrap_output,
+			show_cursor_line = opts.show_cursor_line,
+			keymaps = opts.keymaps,
+		})
+	else
+		bufnr, winnr = create_split_win({
+			split_direction = opts.split_direction,
+			split_size = opts.split_size,
+			show_line_numbers = opts.show_line_numbers,
+			wrap_output = opts.wrap_output,
+			show_cursor_line = opts.show_cursor_line,
+			keymaps = opts.keymaps,
+		})
+	end
 
 	-- Set initial content
 	vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
