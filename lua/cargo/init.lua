@@ -117,7 +117,26 @@ local function load_cargo_lib()
 	debug_print("Looking for library at:", lib_path)
 
 	if vim.fn.filereadable(lib_path) == 0 then
-		error(string.format("Cargo library not found at path: %s", lib_path))
+		local help_msg = string.format(
+			[[Cargo library not found at path: %s
+
+To fix this issue:
+1. Ensure you have the required dependencies installed:
+   - Ubuntu/Debian: sudo apt install libluajit-5.1-dev
+   - macOS: brew install luajit
+   - Arch Linux: sudo pacman -S luajit
+
+2. Run the build command manually:
+   cd %s && cargo build --release
+
+3. If using lazy.nvim, ensure your config includes:
+   build = "cargo build --release"
+
+For more details, see: https://github.com/nwiizo/cargo.nvim#-requirements]],
+			lib_path,
+			vim.fn.fnamemodify(lib_path, ":h:h:h")
+		)
+		error(help_msg)
 	end
 
 	local loaded, err = package.loadlib(lib_path, "luaopen_cargo_nvim")

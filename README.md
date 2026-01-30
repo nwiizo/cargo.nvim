@@ -28,6 +28,7 @@
     - [Using lazy.nvim](#using-lazynvim)
     - [Using packer.nvim](#using-packernvim)
   - [📋 Requirements](#-requirements)
+    - [Troubleshooting](#troubleshooting)
   - [🛠️ Available Commands](#️-available-commands)
   - [⚙️ Configuration](#️-configuration)
   - [⌨️ Key Mappings](#️-key-mappings)
@@ -100,12 +101,31 @@ use {
 
 - 💻 Neovim >= 0.9.0
 - 🦀 Rust and Cargo installed on your system
-- 📚 Additional dependencies:
-  - **Ubuntu/Debian:** `libluajit-5.1-dev` (Install with `sudo apt install libluajit-5.1-dev`)
-  - **macOS:** `luajit` (Install with `brew install luajit`)
-  - For other Linux distributions, you may need to install an equivalent LuaJIT development package
+- 📚 **LuaJIT development libraries (REQUIRED for building)**:
+  - **Ubuntu/Debian:** `sudo apt install libluajit-5.1-dev`
+  - **macOS:** `brew install luajit`
+  - **Arch Linux:** `sudo pacman -S luajit`
+  - **Fedora:** `sudo dnf install luajit-devel`
 
-If you encounter build errors mentioning `lluajit-5.1` during installation, you likely need to install the LuaJIT development package for your system.
+> **Important:** You must install the LuaJIT development package BEFORE installing this plugin. The plugin includes a native Rust library that links against LuaJIT.
+
+### Troubleshooting
+
+If you see "Cargo library not found" error after installation:
+
+1. **Check if LuaJIT dev package is installed** (see above)
+2. **Rebuild the library manually:**
+   ```bash
+   cd ~/.local/share/nvim/lazy/cargo.nvim  # or your plugin directory
+   cargo build --release
+   ```
+3. **Verify the library was built:**
+   ```bash
+   ls -la target/release/libcargo_nvim.*
+   # Should show libcargo_nvim.so (Linux) or libcargo_nvim.dylib (macOS)
+   ```
+
+If `cargo build --release` fails with "unable to find library -lluajit-5.1", you need to install the LuaJIT development package for your system.
 
 ## 🛠️ Available Commands
 
