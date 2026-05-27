@@ -70,6 +70,7 @@ local default_opts = {
 		scroll_top = "gg",
 		scroll_bottom = "G",
 		interrupt = "<C-c>",
+		send_input = "i",
 		toggle_wrap = "w",
 		copy_output = "y",
 		clear_output = "c",
@@ -199,48 +200,6 @@ local function setup_highlights()
 	})
 end
 
--- Process single line safely
-local function format_line(line, with_timestamp)
-	if type(line) ~= "string" then
-		return nil
-	end
-
-	-- Remove all types of line endings and null bytes
-	local clean = line:gsub("\r\n", " "):gsub("\n", " "):gsub("\r", " "):gsub("%z", "")
-
-	-- Skip empty lines
-	if clean:match("^%s*$") then
-		return nil
-	end
-
-	-- Add timestamp if requested
-	if with_timestamp then
-		local timestamp = os.date("%H:%M:%S")
-
-		-- Format based on content
-		if clean:match("^error") or clean:match("^Error") then
-			return string.format("[%s] @error@%s", timestamp, clean)
-		elseif clean:match("^warning") or clean:match("^Warning") then
-			return string.format("[%s] @warning@%s", timestamp, clean)
-		elseif clean:match("^%s*Compiling") then
-			return string.format("[%s] @info@%s", timestamp, clean)
-		elseif clean:match("^%s*Running") then
-			return string.format("[%s] @info@%s", timestamp, clean)
-		elseif clean:match("^%s*Finished") then
-			return string.format("[%s] @success@%s", timestamp, clean)
-		elseif clean:match("^%s*Checking") then
-			return string.format("[%s] @info@%s", timestamp, clean)
-		elseif clean:match("cargo") or clean:match("[Dd]ebug") or clean:match("[Pp]rofile") then
-			-- Ensure cargo command lines and build profile info are displayed
-			return string.format("[%s] @info@%s", timestamp, clean)
-		else
-			return string.format("[%s] %s", timestamp, clean)
-		end
-	end
-
-	return clean
-end
-
 -- Create floating window
 local function create_float_win(opts)
 	local width = math.floor(vim.o.columns * opts.window_width)
@@ -261,16 +220,16 @@ local function create_float_win(opts)
 
 	local winnr = vim.api.nvim_open_win(bufnr, true, win_opts)
 
-	vim.api.nvim_buf_set_option(bufnr, "buftype", "nofile")
-	vim.api.nvim_buf_set_option(bufnr, "swapfile", false)
-	vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
-	vim.api.nvim_buf_set_option(bufnr, "filetype", "cargo-output")
+	vim.bo[bufnr].buftype = "nofile"
+	vim.bo[bufnr].swapfile = false
+	vim.bo[bufnr].modifiable = true
+	vim.bo[bufnr].filetype = "cargo-output"
 
 	if opts.show_line_numbers then
-		vim.api.nvim_win_set_option(winnr, "number", true)
+		vim.wo[winnr].number = true
 	end
-	vim.api.nvim_win_set_option(winnr, "wrap", opts.wrap_output)
-	vim.api.nvim_win_set_option(winnr, "cursorline", opts.show_cursor_line)
+	vim.wo[winnr].wrap = opts.wrap_output
+	vim.wo[winnr].cursorline = opts.show_cursor_line
 
 	-- Set up key mappings
 	local function set_keymap(mode, key, action)
@@ -287,6 +246,11 @@ local function create_float_win(opts)
 
 	-- Interrupt command mapping
 	set_keymap("n", opts.keymaps.interrupt, '<cmd>lua require("cargo").interrupt()<CR>')
+
+	-- Send stdin to the running command (for interactive programs)
+	if opts.keymaps.send_input then
+		set_keymap("n", opts.keymaps.send_input, '<cmd>lua require("cargo").send_input()<CR>')
+	end
 
 	-- Scroll mappings
 	set_keymap("n", opts.keymaps.scroll_up, "<C-u>")
@@ -306,135 +270,23 @@ local function create_float_win(opts)
 	return bufnr, winnr
 end
 
--- Process command output (kept for reference but suppressing warning with _G.process_output)
-_G.process_output = function(output)
-	if type(output) ~= "string" then
-		return { "Invalid output format" }
+-- Tag one output line with a highlight marker for the cargo-output syntax.
+local function format_output_line(line)
+	local timestamp = os.date("%H:%M:%S")
+	if line:match("^%s*[Ee]rror") then
+		return string.format("[%s] @error@%s", timestamp, line)
+	elseif line:match("^%s*[Ww]arning") then
+		return string.format("[%s] @warning@%s", timestamp, line)
+	elseif line:match("^%s*Compiling") or line:match("^%s*Running") or line:match("^%s*Checking") then
+		return string.format("[%s] @info@%s", timestamp, line)
+	elseif line:match("^%s*Finished") then
+		return string.format("[%s] @success@%s", timestamp, line)
 	end
-
-	local cargo_messages = {}
-	local program_output = {}
-
-	-- Extract important cargo messages first
-	local finished_match = output:match("Finished[^\r\n]+")
-	if finished_match then
-		table.insert(cargo_messages, string.format("[%s] @success@%s", os.date("%H:%M:%S"), finished_match))
-	end
-
-	local checking_match = output:match("Checking[^\r\n]+")
-	if checking_match then
-		table.insert(cargo_messages, string.format("[%s] @info@%s", os.date("%H:%M:%S"), checking_match))
-	end
-
-	local running_match = output:match("Running[^\r\n]+")
-	if running_match then
-		table.insert(cargo_messages, string.format("[%s] @info@%s", os.date("%H:%M:%S"), running_match))
-	end
-
-	local compiling_match = output:match("Compiling[^\r\n]+")
-	if compiling_match then
-		table.insert(cargo_messages, string.format("[%s] @info@%s", os.date("%H:%M:%S"), compiling_match))
-	end
-
-	-- Process line by line, separating cargo and program output
-	for line in output:gmatch("[^\r\n]+") do
-		-- Skip lines we've already extracted as cargo messages
-		if
-			line:match("^%s*Finished")
-			or line:match("^%s*Checking")
-			or line:match("^%s*Running")
-			or line:match("^%s*Compiling")
-		then
-			-- Skip these as they're already handled above
-			local _ = true
-		-- Cargo-specific messages go into cargo_messages
-		elseif
-			line:match("^%s*error")
-			or line:match("^%s*warning")
-			or line:match("cargo")
-			or line:match("Downloading")
-			or line:match("Installing")
-			or line:match("[Dd]ocumentation")
-		then
-			local formatted = format_line(line, true)
-			if formatted then
-				table.insert(cargo_messages, formatted)
-			end
-		-- All other output is treated as program output
-		else
-			local formatted = line -- For program output, keep it simpler
-			if formatted and formatted:len() > 0 and not formatted:match("^%s*$") then
-				table.insert(program_output, string.format("[%s] %s", os.date("%H:%M:%S"), formatted))
-			end
-		end
-	end
-
-	-- If no output was processed, add a fallback
-	if #program_output == 0 and #cargo_messages == 0 and output:len() > 0 then
-		table.insert(program_output, "[" .. os.date("%H:%M:%S") .. "] " .. output:gsub("\r\n", " "):gsub("\n", " "))
-	end
-
-	return {
-		program_output = program_output,
-		cargo_messages = cargo_messages,
-	}
+	return string.format("[%s] %s", timestamp, line)
 end
 
--- Create input field for interactive mode (kept for reference but suppressing warning with _G.create_input_field)
-_G.create_input_field = function(bufnr, winnr, opts)
-	local input_bufnr = vim.api.nvim_create_buf(false, true)
-	local input_height = opts.input_field_height or 1
-	local input_width = vim.api.nvim_win_get_width(winnr)
-
-	local input_win = vim.api.nvim_open_win(input_bufnr, true, {
-		relative = "win",
-		win = winnr,
-		row = vim.api.nvim_win_get_height(winnr) - input_height,
-		col = 0,
-		width = input_width,
-		height = input_height,
-		style = "minimal",
-		border = "single",
-		title = "Input",
-		title_pos = "center",
-	})
-
-	-- Configure input buffer
-	vim.api.nvim_buf_set_option(input_bufnr, "modifiable", true)
-	vim.api.nvim_buf_set_option(input_bufnr, "buftype", "prompt")
-
-	-- Set prompt callback
-	vim.fn.prompt_setcallback(input_bufnr, function(input)
-		-- Set flag when input is sent (for inactivity detection)
-		vim.api.nvim_buf_set_var(bufnr, "cargo_last_input_time", os.time())
-
-		-- Send input to process
-		if cargo_lib and cargo_lib.send_input then
-			cargo_lib.send_input(input .. "\n")
-
-			-- Display input history in main buffer
-			vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
-			vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
-				"@info@Input: " .. input,
-			})
-			vim.api.nvim_buf_set_option(bufnr, "modifiable", false)
-
-			-- Clear prompt after input
-			vim.api.nvim_buf_set_lines(input_bufnr, 0, -1, false, {})
-		end
-	end)
-
-	-- Set prompt
-	vim.fn.prompt_setprompt(input_bufnr, "Input> ")
-
-	-- Focus input field
-	vim.api.nvim_set_current_win(input_win)
-	vim.cmd("startinsert")
-
-	return input_bufnr
-end
-
--- Execute command using Neovim's native job system
+-- Execute a cargo command: start it in the Rust backend and stream output by
+-- polling the job on a libuv timer.
 local function execute_command_native(cmd_name, args, opts)
 	-- Save all modified buffers before executing command
 	vim.cmd("wa")
@@ -450,157 +302,73 @@ local function execute_command_native(cmd_name, args, opts)
 		keymaps = opts.keymaps,
 	})
 
-	-- Set initial content
-	vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
-
-	-- Create command string safely
+	-- Initial buffer content: show the command being run.
 	local args_str = #args > 0 and (" " .. table.concat(args, " ")) or ""
 	local cmd_line = string.format("cargo %s%s", cmd_name, args_str)
-
-	-- Initial buffer content
+	vim.bo[bufnr].modifiable = true
 	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
 		"@command@" .. cmd_line,
 		string.rep("─", vim.api.nvim_win_get_width(winnr) - 2),
 		"",
 	})
+	vim.bo[bufnr].modifiable = false
 
-	-- Prepare for job
-	vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
+	-- Start the cargo job in the Rust backend and stream output by polling.
+	local job_id = cargo_lib.start(cmd_name, args)
+	vim.b[bufnr].cargo_job_id = job_id
 
-	-- Start job
-	local job_id = vim.fn.jobstart(cmd_line, {
-		on_stdout = function(_, data)
-			if data and #data > 1 or (data[1] and data[1]:len() > 0) then
-				vim.schedule(function()
-					if vim.api.nvim_buf_is_valid(bufnr) then
-						vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
-						-- Process and format the output
-						local formatted_lines = {}
-						for _, line in ipairs(data) do
-							if line and line:len() > 0 then
-								local timestamp = os.date("%H:%M:%S")
-								if line:match("^error") or line:match("^Error") then
-									table.insert(formatted_lines, string.format("[%s] @error@%s", timestamp, line))
-								elseif line:match("^warning") or line:match("^Warning") then
-									table.insert(formatted_lines, string.format("[%s] @warning@%s", timestamp, line))
-								elseif line:match("^%s*Compiling") then
-									table.insert(formatted_lines, string.format("[%s] @info@%s", timestamp, line))
-								elseif line:match("^%s*Running") then
-									table.insert(formatted_lines, string.format("[%s] @info@%s", timestamp, line))
-								elseif line:match("^%s*Finished") then
-									table.insert(formatted_lines, string.format("[%s] @success@%s", timestamp, line))
-								else
-									table.insert(formatted_lines, string.format("[%s] %s", timestamp, line))
-								end
-							end
-						end
-
-						if #formatted_lines > 0 then
-							vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, formatted_lines)
-						end
-						vim.api.nvim_buf_set_option(bufnr, "modifiable", false)
-					end
-				end)
-			end
-		end,
-		on_stderr = function(_, data)
-			if data and #data > 1 or (data[1] and data[1]:len() > 0) then
-				vim.schedule(function()
-					if vim.api.nvim_buf_is_valid(bufnr) then
-						vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
-						-- Process and format the stderr
-						local formatted_lines = {}
-						for _, line in ipairs(data) do
-							if line and line:len() > 0 then
-								local timestamp = os.date("%H:%M:%S")
-								if line:match("^error") or line:match("^Error") then
-									table.insert(formatted_lines, string.format("[%s] @error@%s", timestamp, line))
-								else
-									table.insert(formatted_lines, string.format("[%s] @error@%s", timestamp, line))
-								end
-							end
-						end
-
-						if #formatted_lines > 0 then
-							vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, formatted_lines)
-						end
-						vim.api.nvim_buf_set_option(bufnr, "modifiable", false)
-					end
-				end)
-			end
-		end,
-		on_exit = function(_, exitcode)
-			vim.schedule(function()
-				if vim.api.nvim_buf_is_valid(bufnr) then
-					vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
-					vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
-						"",
-						exitcode == 0 and "@success@Command completed successfully."
-							or "@error@Command failed with code " .. exitcode,
-						"",
-						"@info@Press any key to close",
-					})
-					vim.api.nvim_buf_set_option(bufnr, "modifiable", false)
-
-					-- Auto-close timer
-					if opts.auto_close then
-						vim.defer_fn(function()
-							if vim.api.nvim_win_is_valid(winnr) then
-								vim.api.nvim_win_close(winnr, true)
-							end
-						end, opts.close_timeout)
-					end
-				end
-			end)
-		end,
-		stdout_buffered = false,
-		stderr_buffered = false,
-		detach = false,
-	})
-
-	-- Associate job ID with buffer
-	vim.api.nvim_buf_set_var(bufnr, "cargo_job_id", job_id)
-
-	-- Set up interrupt handler
-	vim.keymap.set("n", opts.keymaps.interrupt, function()
-		local job = vim.api.nvim_buf_get_var(bufnr, "cargo_job_id")
-		if job and vim.fn.jobstop(job) == 1 then
-			vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
-			vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
-				"",
-				"@warning@Process interrupted by user",
-			})
-			vim.api.nvim_buf_set_option(bufnr, "modifiable", false)
+	local timer = (vim.uv or vim.loop).new_timer()
+	local function stop_timer()
+		if timer and not timer:is_closing() then
+			timer:stop()
+			timer:close()
 		end
-	end, { buffer = bufnr, noremap = true, silent = true })
+		timer = nil
+	end
 
-	-- Safety timer to prevent UI hangs
-	local safety_timer = vim.loop.new_timer()
-	local safety_timeout = (opts.safety_timeout or 30) * 1000 -- convert to ms
-	safety_timer:start(
-		safety_timeout,
-		safety_timeout,
+	timer:start(
+		0,
+		opts.poll_interval or 50,
 		vim.schedule_wrap(function()
-			-- Check if job is still running
-			if vim.fn.jobwait({ job_id }, 0)[1] == -1 then
-				-- Check if UI is still responsive
-				if vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_win_is_valid(winnr) then
-					vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
-					vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
-						"",
-						"@warning@Task running for extended period. Enter input or press Ctrl+C to interrupt.",
-					})
-					vim.api.nvim_buf_set_option(bufnr, "modifiable", false)
-				else
-					-- Fallback: stop job
-					vim.fn.jobstop(job_id)
-					safety_timer:stop()
-					safety_timer:close()
+			-- Window/buffer gone: interrupt the job and stop polling.
+			if not vim.api.nvim_buf_is_valid(bufnr) then
+				cargo_lib.interrupt(job_id)
+				stop_timer()
+				return
+			end
+
+			local lines, finished, success = cargo_lib.poll(job_id)
+
+			if lines and #lines > 0 then
+				local formatted = {}
+				for _, line in ipairs(lines) do
+					formatted[#formatted + 1] = format_output_line(line)
 				end
-			else
-				-- Job finished, stop timer
-				safety_timer:stop()
-				safety_timer:close()
+				vim.bo[bufnr].modifiable = true
+				vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, formatted)
+				vim.bo[bufnr].modifiable = false
+				if vim.api.nvim_win_is_valid(winnr) then
+					vim.api.nvim_win_set_cursor(winnr, { vim.api.nvim_buf_line_count(bufnr), 0 })
+				end
+			end
+
+			if finished then
+				stop_timer()
+				vim.b[bufnr].cargo_job_id = nil
+				vim.bo[bufnr].modifiable = true
+				vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
+					"",
+					success and "@success@Command completed successfully." or "@error@Command finished with errors.",
+					"@info@Press q to close",
+				})
+				vim.bo[bufnr].modifiable = false
+				if opts.auto_close and success and vim.api.nvim_win_is_valid(winnr) then
+					vim.defer_fn(function()
+						if vim.api.nvim_win_is_valid(winnr) then
+							vim.api.nvim_win_close(winnr, true)
+						end
+					end, opts.close_timeout)
+				end
 			end
 		end)
 	)
@@ -608,27 +376,29 @@ local function execute_command_native(cmd_name, args, opts)
 	return bufnr, winnr
 end
 
--- Interrupt running cargo command
+-- Interrupt the cargo command running in the current output buffer.
+-- The Rust backend terminates the child; the poll loop renders the result.
 function M.interrupt()
-	-- Display message
-	vim.api.nvim_echo({ { "Interrupting cargo process...", "WarningMsg" } }, true, {})
-
-	-- Call interrupt function from Rust library
-	if cargo_lib and cargo_lib.interrupt then
-		cargo_lib.interrupt()
-
-		-- If current window is valid, display that process was interrupted
-		local bufnr = vim.api.nvim_get_current_buf()
-		if vim.api.nvim_buf_get_option(bufnr, "filetype") == "cargo-output" then
-			vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
-			vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
-				"",
-				"@error@Process interrupted by user",
-				"@info@Press any key to close this window",
-			})
-			vim.api.nvim_buf_set_option(bufnr, "modifiable", false)
-		end
+	local bufnr = vim.api.nvim_get_current_buf()
+	local job_id = vim.b[bufnr].cargo_job_id
+	if job_id and cargo_lib and cargo_lib.interrupt then
+		vim.api.nvim_echo({ { "Interrupting cargo process...", "WarningMsg" } }, true, {})
+		cargo_lib.interrupt(job_id)
 	end
+end
+
+-- Send a line to the stdin of the cargo command in the current output buffer.
+function M.send_input()
+	local bufnr = vim.api.nvim_get_current_buf()
+	local job_id = vim.b[bufnr].cargo_job_id
+	if not (job_id and cargo_lib and cargo_lib.send_input) then
+		return
+	end
+	vim.ui.input({ prompt = "stdin> " }, function(input)
+		if input ~= nil then
+			cargo_lib.send_input(job_id, input .. "\n")
+		end
+	end)
 end
 
 -- Initialize plugin
@@ -649,9 +419,19 @@ function M.setup(opts)
 		local command_name = "Cargo" .. cmd_name:sub(1, 1):upper() .. cmd_name:sub(2)
 		debug_print("Registering command:", command_name)
 
+		-- The cargo subcommand defaults to the config key, but can be overridden
+		-- together with preset arguments so new commands can be added from the
+		-- config alone, e.g. { cmd = "test", args = { "--release" } } registers
+		-- :CargoTestRelease running `cargo test --release`.
+		local subcommand = cmd_opts.cmd or cmd_name
+		local preset_args = cmd_opts.args or {}
+
 		vim.api.nvim_create_user_command(command_name, function(args)
-			-- Filter out empty arguments
+			-- Start from the configured preset arguments, then append user input
 			local cmd_args = {}
+			for _, arg in ipairs(preset_args) do
+				table.insert(cmd_args, arg)
+			end
 			if args.args and args.args ~= "" then
 				for _, arg in ipairs(vim.split(args.args, "%s+")) do
 					if arg and arg ~= "" then
@@ -659,9 +439,9 @@ function M.setup(opts)
 					end
 				end
 			end
-			execute_command_native(cmd_name, cmd_args, opts)
+			execute_command_native(subcommand, cmd_args, opts)
 		end, {
-			nargs = cmd_opts.nargs,
+			nargs = cmd_opts.nargs or "*",
 			desc = cmd_opts.desc,
 		})
 	end
@@ -728,9 +508,9 @@ function M.run_in_terminal(args)
 	})
 
 	-- Set window options
-	vim.api.nvim_win_set_option(winnr, "number", true)
-	vim.api.nvim_win_set_option(winnr, "wrap", true)
-	vim.api.nvim_win_set_option(winnr, "cursorline", true)
+	vim.wo[winnr].number = true
+	vim.wo[winnr].wrap = true
+	vim.wo[winnr].cursorline = true
 
 	-- Start terminal with cargo run
 	local args_str = table.concat(args, " ")
@@ -739,13 +519,13 @@ function M.run_in_terminal(args)
 		on_exit = function()
 			vim.schedule(function()
 				if vim.api.nvim_buf_is_valid(bufnr) then
-					vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
+					vim.bo[bufnr].modifiable = true
 					vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {
 						"",
 						"=== Process completed ===",
 						"Press q or <Esc> to close this window",
 					})
-					vim.api.nvim_buf_set_option(bufnr, "modifiable", false)
+					vim.bo[bufnr].modifiable = false
 
 					-- Add mappings for closing
 					vim.api.nvim_buf_set_keymap(bufnr, "n", "q", ":q<CR>", {
