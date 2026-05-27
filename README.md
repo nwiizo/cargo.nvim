@@ -19,15 +19,36 @@
 - ⌨️ Easy keyboard shortcuts for window management
 - 📟 Terminal mode for interactive applications
 
+## 🎯 Scope
+
+cargo.nvim is a faithful front-end to the `cargo` CLI inside Neovim: it runs Cargo
+subcommands and shows their streamed output in a readable window, including
+interactive programs (via terminal mode). It is intentionally a *command runner and
+report viewer*, not a language-intelligence layer.
+
+It complements, rather than replaces, the LSP-based Rust tooling you may already use:
+
+- **rust-analyzer / [rustaceanvim](https://github.com/mrcjkb/rustaceanvim)** — inline diagnostics, jump-to-error, hover, macro expansion, code actions, runnables/testables.
+- **[crates.nvim](https://github.com/saecki/crates.nvim)** — editing dependencies inside `Cargo.toml`.
+- **[neotest](https://github.com/nvim-neotest/neotest)** — structured test running and navigation.
+
+If you run those, cargo.nvim is most useful for the Cargo subcommands they don't
+surface (e.g. `audit`, `outdated`, `tree`, `vendor`, `publish`, `doc`, `bench`) and
+for running interactive programs. Overlapping commands such as `check`, `clippy`,
+`test`, and `run` remain available for backward compatibility, but the LSP/neotest
+equivalents generally offer a richer experience.
+
 ## 📑 Table of Contents
 
 - [🚀 cargo.nvim](#-cargonvim)
   - [✨ Features](#-features)
+  - [🎯 Scope](#-scope)
   - [📑 Table of Contents](#-table-of-contents)
   - [📥 Installation](#-installation)
     - [Using lazy.nvim](#using-lazynvim)
     - [Using packer.nvim](#using-packernvim)
   - [📋 Requirements](#-requirements)
+    - [Troubleshooting](#troubleshooting)
   - [🛠️ Available Commands](#️-available-commands)
   - [⚙️ Configuration](#️-configuration)
   - [⌨️ Key Mappings](#️-key-mappings)
@@ -100,12 +121,31 @@ use {
 
 - 💻 Neovim >= 0.9.0
 - 🦀 Rust and Cargo installed on your system
-- 📚 Additional dependencies:
-  - **Ubuntu/Debian:** `libluajit-5.1-dev` (Install with `sudo apt install libluajit-5.1-dev`)
-  - **macOS:** `luajit` (Install with `brew install luajit`)
-  - For other Linux distributions, you may need to install an equivalent LuaJIT development package
+- 📚 **LuaJIT development libraries (REQUIRED for building)**:
+  - **Ubuntu/Debian:** `sudo apt install libluajit-5.1-dev`
+  - **macOS:** `brew install luajit`
+  - **Arch Linux:** `sudo pacman -S luajit`
+  - **Fedora:** `sudo dnf install luajit-devel`
 
-If you encounter build errors mentioning `lluajit-5.1` during installation, you likely need to install the LuaJIT development package for your system.
+> **Important:** You must install the LuaJIT development package BEFORE installing this plugin. The plugin includes a native Rust library that links against LuaJIT.
+
+### Troubleshooting
+
+If you see "Cargo library not found" error after installation:
+
+1. **Check if LuaJIT dev package is installed** (see above)
+2. **Rebuild the library manually:**
+   ```bash
+   cd ~/.local/share/nvim/lazy/cargo.nvim  # or your plugin directory
+   cargo build --release
+   ```
+3. **Verify the library was built:**
+   ```bash
+   ls -la target/release/libcargo_nvim.*
+   # Should show libcargo_nvim.so (Linux) or libcargo_nvim.dylib (macOS)
+   ```
+
+If `cargo build --release` fails with "unable to find library -lluajit-5.1", you need to install the LuaJIT development package for your system.
 
 ## 🛠️ Available Commands
 
@@ -174,6 +214,7 @@ require("cargo").setup({
     scroll_top = "gg",
     scroll_bottom = "G",
     interrupt = "<C-c>",
+    send_input = "i",    -- Send a line to the program's stdin
     toggle_wrap = "w",
     copy_output = "y",
     clear_output = "c",
@@ -181,11 +222,33 @@ require("cargo").setup({
 })
 ```
 
+### Custom Commands
+
+The `commands` table is extensible: add an entry to register a new `:Cargo*`
+command from your configuration alone — no rebuild required. Each entry may set
+`cmd` (the actual Cargo subcommand, defaults to the key) and `args` (arguments
+prepended before any you type):
+
+```lua
+require("cargo").setup({
+  commands = {
+    -- :CargoTestRelease -> `cargo test --release`
+    testRelease = { cmd = "test", args = { "--release" }, desc = "Run tests in release mode" },
+    -- :CargoNextest -> `cargo nextest run`
+    nextest = { cmd = "nextest", args = { "run" }, desc = "Run tests with nextest" },
+  },
+})
+```
+
+The key becomes the command name (`testRelease` → `:CargoTestRelease`). When
+`nargs` is omitted it defaults to `"*"`, so extra arguments are still accepted.
+
 ## ⌨️ Key Mappings
 
 In the floating window:
 - `q` or `<Esc>` - Close the window
-- `<C-c>` - Cancel the running command
+- `<C-c>` - Interrupt the running command
+- `i` - Send a line to the program's stdin
 - `<C-u>` - Scroll up
 - `<C-d>` - Scroll down
 - `gg` - Scroll to top
@@ -196,12 +259,16 @@ In the floating window:
 
 ## 🔄 Interactive Mode
 
-For interactive programs that require user input:
-- An input field appears at the bottom of the window when needed
-- Enter your input and press Enter to send it to the program
-- The plugin automatically detects when a program is waiting for input
-- The window automatically closes after a period of inactivity (configurable)
-- Interactive mode timeout prevents hanging processes and memory leaks
+Commands run asynchronously: output is streamed into the floating window as it is
+produced, and you stay in control of the editor while a command runs.
+
+For programs that read from stdin:
+- Press `i` in the output window to be prompted for a line of input, which is
+  sent to the running program's stdin.
+- Press `<C-c>` to interrupt (terminate) the running command at any time.
+
+For terminal-style programs that need a full TTY (e.g. `proconio`, TUIs), prefer
+[Terminal Mode](#-terminal-mode) below.
 
 ## 📟 Terminal Mode
 
