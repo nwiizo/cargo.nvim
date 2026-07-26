@@ -107,9 +107,12 @@ jobs:
           neovim: true
           version: v0.9.5
 
-      - name: Install Neovim (macOS)
+      - name: Install stable Neovim (macOS)
         if: runner.os == 'macOS'
-        run: brew install neovim
+        uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
+        with:
+          neovim: true
+          version: stable
 
       - name: Show Neovim version
         if: runner.os != 'Windows'
