@@ -1,0 +1,4 @@
+interface:
+  display_name: "Maintain cargo.nvim"
+  short_description: "Maintain cargo.nvim across Rust, Lua, and CI"
+  default_prompt: "Use $maintain-cargo-nvim to maintain Rust, Lua, Neovim, CI, documentation, dependencies, or release tooling safely."

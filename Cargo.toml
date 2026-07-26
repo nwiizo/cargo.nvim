@@ -1,6 +1,6 @@
 [package]
 name = "cargo-nvim"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2024"
 rust-version = "1.97"
 authors = ["nwiizo <nwiizo@gmail.com>"]
@@ -29,6 +29,12 @@ process-wrap = { version = "9.1", features = ["job-object"], default-features = 
 default = ["luajit"]
 lua51 = ["mlua/lua51"]
 luajit = ["mlua/luajit"]
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
 
 [profile.release]
 opt-level = 3

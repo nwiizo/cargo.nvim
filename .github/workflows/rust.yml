@@ -10,6 +10,7 @@ on:
       - "Cargo.lock"
       - ".cargo/config.toml"
       - "lua/**/*.lua"
+      - "plugin/**/*.lua"
       - "tests/**/*.lua"
       - ".github/workflows/rust.yml"
   pull_request:
@@ -20,6 +21,7 @@ on:
       - "Cargo.lock"
       - ".cargo/config.toml"
       - "lua/**/*.lua"
+      - "plugin/**/*.lua"
       - "tests/**/*.lua"
       - ".github/workflows/rust.yml"
 
@@ -55,8 +57,8 @@ jobs:
       - name: Check clippy
         run: cargo clippy --locked --all-targets -- -D warnings
 
-      - name: Check Lua 5.1 feature
-        run: cargo check --locked --no-default-features --features lua51
+      - name: Check clippy (Lua 5.1)
+        run: cargo clippy --locked --all-targets --no-default-features --features lua51 -- -D warnings
 
   msrv:
     name: Rust 1.97
@@ -72,8 +74,11 @@ jobs:
         with:
           toolchain: 1.97.0
 
-      - name: Check minimum supported Rust version
+      - name: Check minimum supported Rust version (LuaJIT)
         run: cargo check --locked
+
+      - name: Check minimum supported Rust version (Lua 5.1)
+        run: cargo check --locked --no-default-features --features lua51
 
   test:
     name: Test (${{ matrix.os }})
@@ -95,18 +100,26 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Install Neovim (Ubuntu)
+      - name: Install Neovim 0.9.5 (Ubuntu)
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y neovim
+        uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
+        with:
+          neovim: true
+          version: v0.9.5
 
       - name: Install Neovim (macOS)
         if: runner.os == 'macOS'
         run: brew install neovim
 
+      - name: Show Neovim version
+        if: runner.os != 'Windows'
+        run: nvim --version
+
       - name: Run tests
         run: cargo test --locked
+
+      - name: Run tests (Lua 5.1)
+        run: cargo test --locked --no-default-features --features lua51
 
       - name: Build native plugin
         run: cargo build --locked --release
