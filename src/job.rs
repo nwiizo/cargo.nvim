@@ -3,9 +3,9 @@
 //! A job spawns `cargo <subcommand> <args>` on a dedicated background thread
 //! and streams its combined stdout/stderr into a shared, drainable buffer.
 //! The Lua side starts a job, polls it on a timer to render new output, and may
-//! feed stdin or interrupt it. Running through `tokio::process::Command` with an
-//! argument vector means no shell is involved, so arguments cannot be
-//! re-interpreted or injected.
+//! feed stdin or interrupt it. Running through a Tokio-backed process group with
+//! an argument vector means no shell is involved, so arguments cannot be
+//! re-interpreted or injected, and cancellation terminates spawned descendants.
 
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -13,8 +13,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 
+use process_wrap::tokio::CommandWrap;
+#[cfg(windows)]
+use process_wrap::tokio::JobObject;
+#[cfg(unix)]
+use process_wrap::tokio::ProcessGroup;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::Command as TokioCommand;
 use tokio::sync::{mpsc, oneshot};
 
 /// Output and lifecycle state shared between a job's background thread and the
@@ -137,10 +141,26 @@ pub(crate) fn interrupt(id: u64) {
         .lock()
         .expect("job registry mutex poisoned")
         .get_mut(&id)
+        && let Some(tx) = job.kill_tx.take()
     {
-        if let Some(tx) = job.kill_tx.take() {
-            let _ = tx.send(());
-        }
+        let _ = tx.send(());
+    }
+}
+
+/// Terminate a job and remove it from the registry without waiting for a poll.
+///
+/// Used when the Lua output window has been closed and there is no longer a
+/// consumer for either the final status or any buffered output.
+pub(crate) fn cancel(id: u64) {
+    let job = registry()
+        .lock()
+        .expect("job registry mutex poisoned")
+        .remove(&id);
+
+    if let Some(mut job) = job
+        && let Some(tx) = job.kill_tx.take()
+    {
+        let _ = tx.send(());
     }
 }
 
@@ -151,13 +171,18 @@ async fn run_job(
     mut stdin_rx: mpsc::UnboundedReceiver<String>,
     mut kill_rx: oneshot::Receiver<()>,
 ) {
-    let mut command = TokioCommand::new("cargo");
-    command
-        .arg(&subcommand)
-        .args(&args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    let mut command = CommandWrap::with_new("cargo", |command| {
+        command
+            .arg(&subcommand)
+            .args(&args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+    });
+    #[cfg(unix)]
+    command.wrap(ProcessGroup::leader());
+    #[cfg(windows)]
+    command.wrap(JobObject);
 
     let mut child = match command.spawn() {
         Ok(child) => child,
@@ -168,17 +193,13 @@ async fn run_job(
         }
     };
 
-    let mut stdout = child.stdout.take().map(|s| BufReader::new(s).lines());
-    let mut stderr = child.stderr.take().map(|s| BufReader::new(s).lines());
-    let mut stdin = child.stdin.take();
+    let mut stdout = child.stdout().take().map(|s| BufReader::new(s).lines());
+    let mut stderr = child.stderr().take().map(|s| BufReader::new(s).lines());
+    let mut stdin = child.stdin().take();
     let mut killing = false;
 
     loop {
         tokio::select! {
-            // Prefer reporting newly read output over noticing exit, so the
-            // final lines are not lost if the child exits promptly.
-            biased;
-
             res = async { stdout.as_mut().expect("guarded by is_some").next_line().await },
                 if stdout.is_some() =>
             {
@@ -238,6 +259,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::sync::atomic::AtomicUsize;
     use std::time::{Duration, Instant};
 
     /// Poll until the job reports finished (or a timeout elapses), collecting
@@ -282,5 +305,71 @@ mod tests {
         let id = start("this-is-not-a-cargo-command".to_string(), Vec::new());
         let (_lines, success) = wait_for(id);
         assert!(!success, "an unknown subcommand must not report success");
+    }
+
+    #[test]
+    fn cancel_terminates_the_process_group_and_worker() {
+        static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+        let suffix = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let package_dir = std::env::temp_dir().join(format!(
+            "cargo-nvim-cancel-test-{}-{suffix}",
+            std::process::id()
+        ));
+        let source_dir = package_dir.join("src");
+        fs::create_dir_all(&source_dir).expect("create temporary Cargo package");
+        fs::write(
+            package_dir.join("Cargo.toml"),
+            "[package]\nname = \"cargo-nvim-cancel-test\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+        )
+        .expect("write temporary manifest");
+        fs::write(
+            source_dir.join("main.rs"),
+            "fn main() {\n    println!(\"READY\");\n    std::thread::sleep(std::time::Duration::from_secs(30));\n}\n",
+        )
+        .expect("write temporary source");
+
+        let id = start(
+            "run".to_string(),
+            vec![
+                "--quiet".to_string(),
+                "--manifest-path".to_string(),
+                package_dir.join("Cargo.toml").display().to_string(),
+            ],
+        );
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let (lines, finished, _) = poll(id);
+            assert!(!finished, "test process exited before cancellation");
+            if lines.iter().any(|line| line == "READY") {
+                break;
+            }
+            assert!(Instant::now() < deadline, "test process did not start");
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let state = Arc::clone(
+            &registry()
+                .lock()
+                .expect("registry")
+                .get(&id)
+                .expect("running job")
+                .state,
+        );
+        cancel(id);
+
+        assert!(!registry().lock().expect("registry").contains_key(&id));
+        assert_eq!(poll(id), (Vec::new(), true, false));
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !state.lock().expect("state").finished {
+            assert!(
+                Instant::now() < deadline,
+                "cancelled process group did not terminate"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        fs::remove_dir_all(package_dir).expect("remove temporary Cargo package");
     }
 }

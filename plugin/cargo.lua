@@ -16,7 +16,6 @@ vim.g.loaded_cargo_nvim = 1
 -- Plugin setup will be handled by the user via their configuration
 -- Example:
 -- require('cargo').setup({
---     float_window = true,
 --     auto_close = true,
---     window_height = 15
+--     window_height = 0.8
 -- })

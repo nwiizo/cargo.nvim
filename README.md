@@ -54,6 +54,7 @@ equivalents generally offer a richer experience.
   - [⌨️ Key Mappings](#️-key-mappings)
   - [🔄 Interactive Mode](#-interactive-mode)
   - [📟 Terminal Mode](#-terminal-mode)
+  - [🧪 Development](#-development)
   - [👥 Contributing](#-contributing)
   - [📜 License](#-license)
   - [💝 Acknowledgements](#-acknowledgements)
@@ -66,10 +67,9 @@ equivalents generally offer a richer experience.
 ```lua
 {
   "nwiizo/cargo.nvim",
-  build = "cargo build --release",
+  build = "cargo build --locked --release",
   config = function()
     require("cargo").setup({
-      float_window = true,
       window_width = 0.8,
       window_height = 0.8,
       border = "rounded",
@@ -103,10 +103,9 @@ equivalents generally offer a richer experience.
 ```lua
 use {
   "nwiizo/cargo.nvim",
-  run = "cargo build --release",
+  run = "cargo build --locked --release",
   config = function()
     require("cargo").setup({
-      float_window = true,
       window_width = 0.8,
       window_height = 0.8,
       border = "rounded",
@@ -120,24 +119,24 @@ use {
 ## 📋 Requirements
 
 - 💻 Neovim >= 0.9.0
-- 🦀 Rust and Cargo installed on your system
-- 📚 **LuaJIT development libraries (REQUIRED for building)**:
-  - **Ubuntu/Debian:** `sudo apt install libluajit-5.1-dev`
-  - **macOS:** `brew install luajit`
-  - **Arch Linux:** `sudo pacman -S luajit`
-  - **Fedora:** `sudo dnf install luajit-devel`
+- 🦀 Rust and Cargo >= 1.97
 
-> **Important:** You must install the LuaJIT development package BEFORE installing this plugin. The plugin includes a native Rust library that links against LuaJIT.
+The native module uses Neovim's embedded LuaJIT at runtime. Building it does not
+require separate Lua or LuaJIT headers and libraries. The repository includes the
+linker configuration required for module builds on macOS.
 
 ### Troubleshooting
 
 If you see "Cargo library not found" error after installation:
 
-1. **Check if LuaJIT dev package is installed** (see above)
+1. **Check your Rust version:**
+   ```bash
+   rustc --version
+   ```
 2. **Rebuild the library manually:**
    ```bash
    cd ~/.local/share/nvim/lazy/cargo.nvim  # or your plugin directory
-   cargo build --release
+    cargo build --locked --release
    ```
 3. **Verify the library was built:**
    ```bash
@@ -145,7 +144,8 @@ If you see "Cargo library not found" error after installation:
    # Should show libcargo_nvim.so (Linux) or libcargo_nvim.dylib (macOS)
    ```
 
-If `cargo build --release` fails with "unable to find library -lluajit-5.1", you need to install the LuaJIT development package for your system.
+If the build still fails, run it again with `RUST_BACKTRACE=1` and include the
+complete Cargo error when opening an issue.
 
 ## 🛠️ Available Commands
 
@@ -184,7 +184,6 @@ You can customize cargo.nvim by passing options to the setup function:
 ```lua
 require("cargo").setup({
   -- Window settings
-  float_window = true,          -- Use floating window
   window_width = 0.8,           -- Window width (80% of editor width)
   window_height = 0.8,          -- Window height (80% of editor height)
   border = "rounded",           -- Border style ("none", "single", "double", "rounded")
@@ -194,17 +193,8 @@ require("cargo").setup({
   
   -- Auto-close settings
   auto_close = true,            -- Auto close window on success
-  close_timeout = 5000,         -- Close window after 5000ms
-  
-  -- Timeout settings
-  run_timeout = 300,            -- Timeout for cargo run in seconds
-  interactive_timeout = 30,     -- Inactivity timeout for interactive mode
-  
-  -- Advanced behavior options
-  force_interactive_run = true, -- Always treat cargo run as interactive mode
-  max_inactivity_warnings = 3,  -- Maximum number of inactivity warnings before termination
-  detect_proconio = true,       -- Enable detection of proconio usage
-  force_smart_detection = true, -- Always use smart detection for interactive programs
+  close_timeout = 30000,        -- Close window after 30 seconds
+  poll_interval = 50,           -- Poll streamed output every 50ms
   
   -- Key mappings (customizable)
   keymaps = {
@@ -286,6 +276,24 @@ For highly interactive applications (e.g., using proconio or TUI applications):
 - `<C-\><C-n>` - Switch to normal mode (while running)
 - `<C-c>` - Send interrupt signal
 - `<C-d>` - Send EOF signal
+
+## 🧪 Development
+
+Run the same checks used by CI:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
+stylua --check lua plugin tests
+luacheck lua plugin tests
+cargo build --locked --release
+nvim --headless -u NONE -l tests/integration.lua
+```
+
+`cargo test` covers the Rust job backend. The headless Neovim test loads the
+compiled module in its real LuaJIT host and covers command registration,
+configuration, streaming output, and terminal execution.
 
 ## 👥 Contributing
 

@@ -7,33 +7,63 @@ on:
       - main
     paths:
       - "**/*.lua"
+      - ".luacheckrc"
+      - "stylua.toml"
+      - ".github/workflows/lua.yml"
   pull_request:
     branches:
       - main
     paths:
       - "**/*.lua"
+      - ".luacheckrc"
+      - "stylua.toml"
+      - ".github/workflows/lua.yml"
+
+permissions:
+  contents: read
 
 jobs:
   stylua:
     name: Check Lua style
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - name: Install stylua
-        uses: baptiste0928/cargo-install@v3
+        uses: baptiste0928/cargo-install@0f9287ef7fc8a8d572ce269250936ded8fbc5323 # v3
         with:
           crate: stylua
-          features: lua54
+          features: luajit
       - run: stylua --version
       - run: stylua --color always --check ./lua/ ./plugin/ ./tests/
 
   luacheck:
     name: Lint Lua
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-      - name: Luacheck linter
-        uses: lunarmodules/luacheck@v1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          args: ./lua/
+          persist-credentials: false
+      - name: Luacheck linter
+        uses: lunarmodules/luacheck@cc089e3f65acdd1ef8716cc73a3eca24a6b845e4 # v1
+        with:
+          args: ./lua/ ./plugin/ ./tests/
+
+  busted:
+    name: Test Lua helpers
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Install Busted
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua-busted
+      - name: Run tests
+        run: busted tests/command_spec.lua

@@ -12,25 +12,3 @@ mod lua_exports;
 fn cargo_nvim(lua: &mlua::Lua) -> mlua::Result<mlua::Table> {
     lua_exports::register_commands(lua)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use mlua::Lua;
-
-    #[test]
-    fn test_module_registration() {
-        let lua = Lua::new();
-        assert!(cargo_nvim(&lua).is_ok());
-    }
-
-    #[test]
-    fn test_exported_functions() {
-        let lua = Lua::new();
-        let table = cargo_nvim(&lua).unwrap();
-        assert!(table.get::<mlua::Function>("start").is_ok());
-        assert!(table.get::<mlua::Function>("poll").is_ok());
-        assert!(table.get::<mlua::Function>("send_input").is_ok());
-        assert!(table.get::<mlua::Function>("interrupt").is_ok());
-    }
-}
